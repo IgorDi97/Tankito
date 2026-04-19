@@ -1,0 +1,44 @@
+name: Snapshot Ministerio
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Crea cartella data
+        run: mkdir -p data
+
+      - name: Scarica dati Ministerio
+        run: |
+          curl -sS -f -o data/latest.json \
+            "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/"
+
+      - name: Verifica che il file non sia vuoto
+        run: |
+          if [ ! -s data/latest.json ]; then
+            echo "File vuoto, errore"
+            exit 1
+          fi
+          echo "Snapshot OK — size: $(wc -c < data/latest.json) bytes"
+
+      - name: Commit e push snapshot
+        run: |
+          git config user.name "Tankito Bot"
+          git config user.email "bot@tankito.app"
+          git add data/latest.json
+          if git diff --staged --quiet; then
+            echo "Nessuna modifica, skip commit"
+          else
+            git commit -m "Snapshot $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
