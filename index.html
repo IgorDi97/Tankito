@@ -4,25 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Tankito — Ahorra en gasolina</title>
-
-  <!-- Leaflet: libreria per la mappa -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-  <!-- Il nostro stile -->
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>⛽ Tankito</h1>
-    <p id="status">Cargando gasolineras…</p>
+    <div class="header-top">
+      <h1>⛽ Tankito</h1>
+      <p id="status">Cargando gasolineras…</p>
+    </div>
+    <div class="header-controls">
+      <select id="fuel-selector">
+        <option value="gasolina95">Gasolina 95</option>
+        <option value="gasolina98">Gasolina 98</option>
+        <option value="diesel">Diésel</option>
+        <option value="dieselPremium">Diésel Premium</option>
+        <option value="glp">GLP</option>
+      </select>
+      <div class="view-toggle">
+        <button id="btn-map" class="active">🗺️ Mapa</button>
+        <button id="btn-list">📋 Lista</button>
+      </div>
+    </div>
   </header>
 
   <div id="map"></div>
+  <div id="list-view" class="hidden"></div>
 
-  <!-- Leaflet script -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- Il nostro codice -->
   <script src="app.js"></script>
 </body>
 </html>
