@@ -1,12 +1,11 @@
-// ====== Tankito — v0.2 ======
-// Feature: pin colorati per prezzo, selettore carburante, vista lista
+// ====== Tankito — v0.3 ======
+// Feature: pin colorati, selettore carburante, vista lista, navigazione
 
 const SNAPSHOT_URL = "data/latest.json";
 const DEFAULT_CENTER = [39.4699, -0.3763]; // Valencia
 const DEFAULT_ZOOM = 12;
 const RADIUS_KM = 30;
 
-// Configurazione tipi di carburante
 const FUEL_TYPES = {
   gasolina95:    { label: "Gasolina 95",      field: "Precio Gasolina 95 E5" },
   gasolina98:    { label: "Gasolina 98",      field: "Precio Gasolina 98 E5" },
@@ -15,13 +14,11 @@ const FUEL_TYPES = {
   glp:           { label: "GLP",              field: "Precio Gases licuados del petróleo" },
 };
 
-// Stato applicazione
 let userCenter = DEFAULT_CENTER;
 let allStations = [];
 let markersLayer = null;
 let selectedFuel = "gasolina95";
 
-// DOM refs
 const statusEl = document.getElementById("status");
 const fuelSelector = document.getElementById("fuel-selector");
 const btnMap = document.getElementById("btn-map");
@@ -29,14 +26,12 @@ const btnList = document.getElementById("btn-list");
 const listView = document.getElementById("list-view");
 const mapEl = document.getElementById("map");
 
-// ---- Inizializza mappa ----
 const map = L.map("map", { zoomControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
   maxZoom: 19,
 }).addTo(map);
 
-// ---- Geolocalizzazione ----
 if (navigator.geolocation) {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -51,7 +46,6 @@ if (navigator.geolocation) {
   loadStations();
 }
 
-// ---- Utilità ----
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -69,17 +63,20 @@ function parseNum(str) {
   return isNaN(n) ? null : n;
 }
 
-// Colore pin in base a posizione percentile del prezzo
 function priceColor(price, minPrice, maxPrice) {
   if (price === null) return "#555";
   if (maxPrice === minPrice) return "#4ade80";
   const ratio = (price - minPrice) / (maxPrice - minPrice);
-  if (ratio <= 0.33) return "#4ade80"; // verde
-  if (ratio <= 0.66) return "#facc15"; // giallo
-  return "#f87171";                    // rosso
+  if (ratio <= 0.33) return "#4ade80";
+  if (ratio <= 0.66) return "#facc15";
+  return "#f87171";
 }
 
-// ---- Carica stazioni ----
+// URL universale per navigazione: funziona su iOS, Android, desktop
+function navigationUrl(lat, lng) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+
 async function loadStations() {
   try {
     statusEl.textContent = "Cargando datos…";
@@ -120,7 +117,6 @@ async function loadStations() {
   }
 }
 
-// ---- Rendering ----
 function renderAll() {
   const fuelKey = selectedFuel;
   const withFuel = allStations.filter((s) => s.prices[fuelKey] !== null);
@@ -170,11 +166,14 @@ function renderMap(stations, minPrice, maxPrice, fuelKey) {
       })
       .join("");
 
+    const navUrl = navigationUrl(s.lat, s.lng);
+
     marker.bindPopup(`
       <div class="station-popup">
         <h3>${s.name}</h3>
         <div class="address">${s.address}</div>
         <div class="prices">${priceRows}</div>
+        <a class="navigate-btn" href="${navUrl}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
       </div>
     `);
     markersLayer.addLayer(marker);
@@ -188,21 +187,26 @@ function renderList(stations, fuelKey) {
   listView.innerHTML = sorted
     .map((s, i) => {
       const price = s.prices[fuelKey];
+      const navUrl = navigationUrl(s.lat, s.lng);
       return `
-        <div class="list-item" data-lat="${s.lat}" data-lng="${s.lng}">
+        <div class="list-item">
           <div class="rank">${i + 1}</div>
-          <div class="info">
+          <div class="info" data-lat="${s.lat}" data-lng="${s.lng}">
             <div class="name">${s.name}</div>
             <div class="address">${s.address}</div>
             <div class="distance">${s.distance.toFixed(1)} km</div>
           </div>
-          <div class="price">${price.toFixed(3)} €/L</div>
+          <div class="price-and-nav">
+            <div class="price">${price.toFixed(3)} €/L</div>
+            <a class="nav-btn" href="${navUrl}" target="_blank" rel="noopener" title="Cómo llegar">🧭</a>
+          </div>
         </div>
       `;
     })
     .join("");
 
-  listView.querySelectorAll(".list-item").forEach((el) => {
+  // Click su info (non sul bottone nav) → apre mappa sulla stazione
+  listView.querySelectorAll(".list-item .info").forEach((el) => {
     el.addEventListener("click", () => {
       const lat = parseFloat(el.dataset.lat);
       const lng = parseFloat(el.dataset.lng);
@@ -212,7 +216,6 @@ function renderList(stations, fuelKey) {
   });
 }
 
-// ---- Toggle vista ----
 function showMapView() {
   mapEl.classList.remove("hidden");
   listView.classList.add("hidden");
@@ -228,7 +231,6 @@ function showListView() {
   btnList.classList.add("active");
 }
 
-// ---- Event listeners ----
 btnMap.addEventListener("click", showMapView);
 btnList.addEventListener("click", showListView);
 
