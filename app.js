@@ -1,30 +1,42 @@
-// ====== Tankito — v0.1 ======
-// Prima versione funzionante: mappa + pin stazioni vicine
+// ====== Tankito — v0.2 ======
+// Feature: pin colorati per prezzo, selettore carburante, vista lista
 
 const SNAPSHOT_URL = "data/latest.json";
 const DEFAULT_CENTER = [39.4699, -0.3763]; // Valencia
 const DEFAULT_ZOOM = 12;
-const RADIUS_KM = 30; // raggio di stazioni da mostrare
+const RADIUS_KM = 30;
 
-const statusEl = document.getElementById("status");
+// Configurazione tipi di carburante
+const FUEL_TYPES = {
+  gasolina95:    { label: "Gasolina 95",      field: "Precio Gasolina 95 E5" },
+  gasolina98:    { label: "Gasolina 98",      field: "Precio Gasolina 98 E5" },
+  diesel:        { label: "Diésel",           field: "Precio Gasoleo A" },
+  dieselPremium: { label: "Diésel Premium",   field: "Precio Gasoleo Premium" },
+  glp:           { label: "GLP",              field: "Precio Gases licuados del petróleo" },
+};
 
-// ---- 1. Inizializza la mappa ----
-const map = L.map("map", {
-  zoomControl: true,
-}).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
-
-// Tile dark theme di CARTO (gratis)
-L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-  {
-    attribution: "&copy; OpenStreetMap &copy; CARTO",
-    maxZoom: 19,
-  }
-).addTo(map);
-
-// ---- 2. Prova a prendere la posizione dell'utente ----
+// Stato applicazione
 let userCenter = DEFAULT_CENTER;
+let allStations = [];
+let markersLayer = null;
+let selectedFuel = "gasolina95";
 
+// DOM refs
+const statusEl = document.getElementById("status");
+const fuelSelector = document.getElementById("fuel-selector");
+const btnMap = document.getElementById("btn-map");
+const btnList = document.getElementById("btn-list");
+const listView = document.getElementById("list-view");
+const mapEl = document.getElementById("map");
+
+// ---- Inizializza mappa ----
+const map = L.map("map", { zoomControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
+  maxZoom: 19,
+}).addTo(map);
+
+// ---- Geolocalizzazione ----
 if (navigator.geolocation) {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -32,17 +44,14 @@ if (navigator.geolocation) {
       map.setView(userCenter, DEFAULT_ZOOM);
       loadStations();
     },
-    () => {
-      // se l'utente nega, rimaniamo su Valencia
-      loadStations();
-    },
+    () => loadStations(),
     { timeout: 5000 }
   );
 } else {
   loadStations();
 }
 
-// ---- 3. Distanza tra due coordinate (formula Haversine) ----
+// ---- Utilità ----
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -50,20 +59,27 @@ function distanceKm(lat1, lon1, lat2, lon2) {
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// ---- 4. Parsing numero spagnolo "1,459" -> 1.459 ----
-function parsePrice(str) {
+function parseNum(str) {
   if (!str || typeof str !== "string") return null;
   const n = parseFloat(str.replace(",", "."));
   return isNaN(n) ? null : n;
 }
 
-// ---- 5. Carica le stazioni dallo snapshot ----
+// Colore pin in base a posizione percentile del prezzo
+function priceColor(price, minPrice, maxPrice) {
+  if (price === null) return "#555";
+  if (maxPrice === minPrice) return "#4ade80";
+  const ratio = (price - minPrice) / (maxPrice - minPrice);
+  if (ratio <= 0.33) return "#4ade80"; // verde
+  if (ratio <= 0.66) return "#facc15"; // giallo
+  return "#f87171";                    // rosso
+}
+
+// ---- Carica stazioni ----
 async function loadStations() {
   try {
     statusEl.textContent = "Cargando datos…";
@@ -71,59 +87,152 @@ async function loadStations() {
     if (!res.ok) throw new Error("No se pudo cargar el snapshot");
     const data = await res.json();
 
-    const allStations = data.ListaEESSPrecio || [];
+    const raw = data.ListaEESSPrecio || [];
     const [userLat, userLng] = userCenter;
 
-    // Filtra solo le stazioni nel raggio
-    const nearby = [];
-    for (const s of allStations) {
-      const lat = parsePrice(s["Latitud"]);
-      const lng = parsePrice(s["Longitud (WGS84)"]);
+    allStations = [];
+    for (const s of raw) {
+      const lat = parseNum(s["Latitud"]);
+      const lng = parseNum(s["Longitud (WGS84)"]);
       if (lat === null || lng === null) continue;
-
       const d = distanceKm(userLat, userLng, lat, lng);
-      if (d <= RADIUS_KM) {
-        nearby.push({ station: s, lat, lng, distance: d });
+      if (d > RADIUS_KM) continue;
+
+      const prices = {};
+      for (const key in FUEL_TYPES) {
+        prices[key] = parseNum(s[FUEL_TYPES[key].field]);
       }
+
+      allStations.push({
+        lat,
+        lng,
+        distance: d,
+        prices,
+        name: s["Rótulo"] || "Estación",
+        address: s["Dirección"] || "",
+      });
     }
 
-    // Disegna i pin
-    for (const { station, lat, lng } of nearby) {
-      const gasolina95 = parsePrice(station["Precio Gasolina 95 E5"]);
-      const diesel = parsePrice(station["Precio Gasoleo A"]);
-
-      const marker = L.circleMarker([lat, lng], {
-        radius: 7,
-        fillColor: "#4ade80",
-        color: "#0f1419",
-        weight: 1.5,
-        fillOpacity: 0.9,
-      }).addTo(map);
-
-      const popupHtml = `
-        <div class="station-popup">
-          <h3>${station["Rótulo"] || "Estación"}</h3>
-          <div class="address">${station["Dirección"] || ""}</div>
-          <div class="prices">
-            ${
-              gasolina95
-                ? `<div class="price-row"><span>Gasolina 95</span><span class="price-value">${gasolina95.toFixed(3)} €/L</span></div>`
-                : ""
-            }
-            ${
-              diesel
-                ? `<div class="price-row"><span>Diésel</span><span class="price-value">${diesel.toFixed(3)} €/L</span></div>`
-                : ""
-            }
-          </div>
-        </div>
-      `;
-      marker.bindPopup(popupHtml);
-    }
-
-    statusEl.textContent = `${nearby.length} gasolineras cerca de ti`;
+    renderAll();
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Error al cargar los datos";
   }
 }
+
+// ---- Rendering ----
+function renderAll() {
+  const fuelKey = selectedFuel;
+  const withFuel = allStations.filter((s) => s.prices[fuelKey] !== null);
+
+  if (withFuel.length === 0) {
+    statusEl.textContent = `0 gasolineras · ${FUEL_TYPES[fuelKey].label}`;
+    if (markersLayer) map.removeLayer(markersLayer);
+    listView.innerHTML = `<p style="text-align:center;color:#8b95a7;padding:40px 16px;">Ninguna gasolinera cercana ofrece ${FUEL_TYPES[fuelKey].label} en este momento.</p>`;
+    return;
+  }
+
+  const prices = withFuel.map((s) => s.prices[fuelKey]);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+
+  statusEl.textContent = `${withFuel.length} gasolineras · ${FUEL_TYPES[fuelKey].label}`;
+
+  renderMap(withFuel, minPrice, maxPrice, fuelKey);
+  renderList(withFuel, fuelKey);
+}
+
+function renderMap(stations, minPrice, maxPrice, fuelKey) {
+  if (markersLayer) map.removeLayer(markersLayer);
+  markersLayer = L.layerGroup();
+
+  for (const s of stations) {
+    const price = s.prices[fuelKey];
+    const color = priceColor(price, minPrice, maxPrice);
+
+    const marker = L.circleMarker([s.lat, s.lng], {
+      radius: 8,
+      fillColor: color,
+      color: "#0f1419",
+      weight: 1.5,
+      fillOpacity: 0.9,
+    });
+
+    const priceRows = Object.keys(FUEL_TYPES)
+      .map((k) => {
+        const p = s.prices[k];
+        if (p === null) return "";
+        const isActive = k === fuelKey;
+        return `<div class="price-row ${isActive ? "active" : ""}">
+          <span>${FUEL_TYPES[k].label}</span>
+          <span class="price-value">${p.toFixed(3)} €/L</span>
+        </div>`;
+      })
+      .join("");
+
+    marker.bindPopup(`
+      <div class="station-popup">
+        <h3>${s.name}</h3>
+        <div class="address">${s.address}</div>
+        <div class="prices">${priceRows}</div>
+      </div>
+    `);
+    markersLayer.addLayer(marker);
+  }
+  markersLayer.addTo(map);
+}
+
+function renderList(stations, fuelKey) {
+  const sorted = [...stations].sort((a, b) => a.prices[fuelKey] - b.prices[fuelKey]);
+
+  listView.innerHTML = sorted
+    .map((s, i) => {
+      const price = s.prices[fuelKey];
+      return `
+        <div class="list-item" data-lat="${s.lat}" data-lng="${s.lng}">
+          <div class="rank">${i + 1}</div>
+          <div class="info">
+            <div class="name">${s.name}</div>
+            <div class="address">${s.address}</div>
+            <div class="distance">${s.distance.toFixed(1)} km</div>
+          </div>
+          <div class="price">${price.toFixed(3)} €/L</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  listView.querySelectorAll(".list-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      const lat = parseFloat(el.dataset.lat);
+      const lng = parseFloat(el.dataset.lng);
+      showMapView();
+      map.setView([lat, lng], 16);
+    });
+  });
+}
+
+// ---- Toggle vista ----
+function showMapView() {
+  mapEl.classList.remove("hidden");
+  listView.classList.add("hidden");
+  btnMap.classList.add("active");
+  btnList.classList.remove("active");
+  setTimeout(() => map.invalidateSize(), 50);
+}
+
+function showListView() {
+  mapEl.classList.add("hidden");
+  listView.classList.remove("hidden");
+  btnMap.classList.remove("active");
+  btnList.classList.add("active");
+}
+
+// ---- Event listeners ----
+btnMap.addEventListener("click", showMapView);
+btnList.addEventListener("click", showListView);
+
+fuelSelector.addEventListener("change", (e) => {
+  selectedFuel = e.target.value;
+  renderAll();
+});
