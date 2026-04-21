@@ -1,0 +1,4 @@
+[build]
+  # Non rifare il deploy se è cambiata solo la cartella data/
+  # (il Tankito Bot committa lì ogni volta che il Ministerio aggiorna i prezzi)
+  ignore = "git diff --quiet HEAD^ HEAD -- . ':(exclude)data/'"
