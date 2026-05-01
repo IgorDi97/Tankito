@@ -1,4 +1,4 @@
-/* ====== TANKITO — Design v0.5 ====== */
+/* ====== TANKITO — Design v0.6 (Branded Accent logo) ====== */
 
 :root {
   /* Palette */
@@ -73,30 +73,37 @@ header {
   gap: 10px;
 }
 
-/* Brand */
+/* === Brand === */
 .brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex-shrink: 0;
 }
 
 .brand-icon {
-  font-size: 1.3rem;
-  filter: drop-shadow(0 0 8px var(--brand-glow));
+  font-size: 1.25rem;
+  filter: drop-shadow(0 0 10px var(--brand-glow));
 }
 
 .brand-name {
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-family: 'Inter', sans-serif;
+  display: inline-flex;
+  align-items: baseline;
 }
 
-/* Search */
+.brand-prefix {
+  color: var(--text-primary);
+}
+
+.brand-suffix {
+  color: var(--brand);
+}
+
+/* === Search === */
 .search-wrapper {
   position: relative;
   flex: 1;
@@ -147,7 +154,6 @@ header {
   overflow-y: auto;
   z-index: 2000;
   box-shadow: var(--shadow-lg);
-  overflow: hidden;
 }
 
 .search-result {
@@ -183,13 +189,13 @@ header {
   font-size: 0.85rem;
 }
 
-/* Controls row */
+/* === Controls row === */
 .controls-row {
   justify-content: space-between;
   gap: 12px;
 }
 
-/* View toggle (chips) */
+/* === View toggle (chips) === */
 .view-toggle {
   display: flex;
   gap: 6px;
@@ -248,7 +254,7 @@ header {
   color: var(--bg-deep);
 }
 
-/* Fuel selector */
+/* === Fuel selector === */
 .fuel-wrapper {
   position: relative;
   display: flex;
@@ -283,7 +289,7 @@ header {
   pointer-events: none;
 }
 
-/* Status bar */
+/* === Status bar === */
 .status-bar {
   display: flex;
   align-items: center;
@@ -639,7 +645,7 @@ main {
   box-shadow: var(--shadow-brand);
 }
 
-/* ====== LEAFLET MARKERS ====== */
+/* ====== LEAFLET MARKERS / CONTAINER ====== */
 .leaflet-container {
   background: var(--bg-deep) !important;
   font-family: 'Inter', sans-serif !important;
@@ -656,7 +662,6 @@ main {
   color: var(--text-secondary) !important;
 }
 
-/* Custom zoom controls */
 .leaflet-control-zoom {
   border: none !important;
   box-shadow: var(--shadow-md) !important;
@@ -684,7 +689,7 @@ main {
   }
 
   .brand-name {
-    display: none; /* nascondiamo il testo, lasciamo solo l'icona ⛽ */
+    display: none;
   }
 
   .brand-icon {
@@ -697,10 +702,6 @@ main {
   }
 
   .controls-row::-webkit-scrollbar { display: none; }
-
-  .chip-label {
-    display: inline; /* manteniamo le label */
-  }
 
   #fuel-selector {
     font-size: 0.75rem;
