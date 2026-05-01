@@ -13,6 +13,21 @@
       <h1>⛽ Tankito</h1>
       <p id="status">Cargando gasolineras…</p>
     </div>
+
+    <div class="search-row">
+      <div class="search-wrapper">
+        <input
+          id="search-input"
+          type="text"
+          placeholder="🔍 Buscar ciudad o dirección…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div id="search-results" class="hidden"></div>
+      </div>
+      <button id="btn-locate" title="Mi ubicación">📍</button>
+    </div>
+
     <div class="header-controls">
       <select id="fuel-selector">
         <option value="gasolina95">Gasolina 95</option>
