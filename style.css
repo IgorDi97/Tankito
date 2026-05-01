@@ -86,13 +86,14 @@ header {
   filter: drop-shadow(0 0 10px var(--brand-glow));
 }
 
-.brand-name {
+ .brand-name {
   font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   font-family: 'Inter', sans-serif;
   display: inline-flex;
   align-items: baseline;
+}
 }
 
 .brand-prefix {
