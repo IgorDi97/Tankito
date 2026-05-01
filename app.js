@@ -237,3 +237,263 @@ function buildPopupHtml(s, fuelKey) {
     <div class="station-popup" data-station-id="${s.id}">
       <div class="popup-header">
         <h3>${s.name}</h3>
+        <button class="fav-btn ${favActive ? "active" : ""}" data-fav-id="${s.id}" title="Favorito">
+          ${favActive ? "★" : "☆"}
+        </button>
+      </div>
+      <div class="address">${s.address}</div>
+      <div class="prices">${priceRows}</div>
+      <a class="navigate-btn" href="${navUrl}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
+    </div>`;
+}
+
+function renderMap(stations, minPrice, maxPrice, fuelKey) {
+  if (markersLayer) map.removeLayer(markersLayer);
+  markersLayer = L.layerGroup();
+
+  for (const s of stations) {
+    const price = s.prices[fuelKey];
+    const color = priceColor(price, minPrice, maxPrice);
+
+    const marker = L.circleMarker([s.lat, s.lng], {
+      radius: 8, fillColor: color, color: "#0f1419",
+      weight: 1.5, fillOpacity: 0.9,
+    });
+
+    marker.bindPopup(buildPopupHtml(s, fuelKey));
+    markersLayer.addLayer(marker);
+  }
+  markersLayer.addTo(map);
+}
+
+function renderList(stations, fuelKey) {
+  const sorted = [...stations].sort((a, b) => a.prices[fuelKey] - b.prices[fuelKey]);
+
+  listView.innerHTML = sorted.map((s, i) => {
+    const price = s.prices[fuelKey];
+    const navUrl = navigationUrl(s.lat, s.lng);
+    const favActive = isFavorite(s.id);
+    return `
+      <div class="list-item">
+        <div class="rank">${i + 1}</div>
+        <div class="info" data-lat="${s.lat}" data-lng="${s.lng}">
+          <div class="name">${s.name}</div>
+          <div class="address">${s.address}</div>
+          <div class="distance">${s.distance.toFixed(1)} km</div>
+        </div>
+        <div class="price-and-nav">
+          <button class="fav-btn ${favActive ? "active" : ""}" data-fav-id="${s.id}" title="Favorito">
+            ${favActive ? "★" : "☆"}
+          </button>
+          <div class="price">${price.toFixed(3)} €/L</div>
+          <a class="nav-btn" href="${navUrl}" target="_blank" rel="noopener" title="Cómo llegar">🧭</a>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listView.querySelectorAll(".list-item .info").forEach((el) => {
+    el.addEventListener("click", () => {
+      const lat = parseFloat(el.dataset.lat);
+      const lng = parseFloat(el.dataset.lng);
+      showMapView();
+      map.setView([lat, lng], 16);
+    });
+  });
+
+  listView.querySelectorAll(".fav-btn").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = el.dataset.favId;
+      toggleFavorite(id);
+      renderAll();
+    });
+  });
+}
+
+map.on("popupopen", (e) => {
+  const popupNode = e.popup.getElement();
+  if (!popupNode) return;
+  const favBtn = popupNode.querySelector(".fav-btn");
+  if (!favBtn) return;
+  favBtn.addEventListener("click", () => {
+    const id = favBtn.dataset.favId;
+    toggleFavorite(id);
+    const station = rawStationsIndex[id];
+    if (station) e.popup.setContent(buildPopupHtml(station, selectedFuel));
+    renderAll();
+  });
+});
+
+// ---- Toggle vista ----
+function showMapView() {
+  currentView = "map";
+  mapEl.classList.remove("hidden");
+  listView.classList.add("hidden");
+  btnMap.classList.add("active");
+  btnList.classList.remove("active");
+  btnFav.classList.remove("active");
+  setTimeout(() => map.invalidateSize(), 50);
+  renderAll();
+}
+function showListView() {
+  currentView = "list";
+  mapEl.classList.add("hidden");
+  listView.classList.remove("hidden");
+  btnMap.classList.remove("active");
+  btnList.classList.add("active");
+  btnFav.classList.remove("active");
+  renderAll();
+}
+function showFavView() {
+  currentView = "fav";
+  mapEl.classList.add("hidden");
+  listView.classList.remove("hidden");
+  btnMap.classList.remove("active");
+  btnList.classList.remove("active");
+  btnFav.classList.add("active");
+  renderAll();
+}
+btnMap.addEventListener("click", showMapView);
+btnList.addEventListener("click", showListView);
+btnFav.addEventListener("click", showFavView);
+
+fuelSelector.addEventListener("change", (e) => {
+  selectedFuel = e.target.value;
+  renderAll();
+});
+
+// ====== NUOVO: Ricerca città/indirizzo ======
+
+function hideSearchResults() {
+  searchResults.classList.add("hidden");
+  searchResults.innerHTML = "";
+}
+
+function showSearchResults() {
+  searchResults.classList.remove("hidden");
+}
+
+async function fetchSuggestions(query) {
+  const url = `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=5&countrycodes=es`;
+  try {
+    const res = await fetch(url, {
+      headers: { "Accept-Language": "es" },
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.error("Errore Nominatim:", err);
+    return [];
+  }
+}
+
+function formatSuggestion(item) {
+  const a = item.address || {};
+  const main = a.city || a.town || a.village || a.suburb || a.neighbourhood || a.road || item.display_name.split(",")[0];
+  const subParts = [a.state, a.country].filter(Boolean);
+  return { main, sub: subParts.join(", "), display: item.display_name };
+}
+
+function renderSuggestions(items) {
+  if (items.length === 0) {
+    searchResults.innerHTML = `<div class="search-empty">Sin resultados</div>`;
+    showSearchResults();
+    return;
+  }
+
+  searchResults.innerHTML = items.map((item, idx) => {
+    const f = formatSuggestion(item);
+    return `
+      <div class="search-result" data-idx="${idx}">
+        <div class="result-main">${f.main}</div>
+        <div class="result-sub">${f.sub}</div>
+      </div>
+    `;
+  }).join("");
+
+  searchResults.querySelectorAll(".search-result").forEach((el) => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.idx);
+      const item = items[idx];
+      const f = formatSuggestion(item);
+      selectLocation(parseFloat(item.lat), parseFloat(item.lon), f.main);
+    });
+  });
+
+  showSearchResults();
+}
+
+function selectLocation(lat, lng, label) {
+  activeCenter = [lat, lng];
+  searchInput.value = label;
+  hideSearchResults();
+  map.setView([lat, lng], DEFAULT_ZOOM);
+
+  // Marker speciale sulla posizione cercata
+  if (searchMarker) map.removeLayer(searchMarker);
+  searchMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      className: "search-pin",
+      html: `<div style="font-size:28px;line-height:1;transform:translate(-50%,-100%);">📍</div>`,
+      iconSize: [28, 28],
+    }),
+  }).addTo(map);
+
+  showMapView();
+  recomputeNearby();
+}
+
+// Debounce: aspetta che l'utente smetta di digitare
+searchInput.addEventListener("input", (e) => {
+  const query = e.target.value.trim();
+  clearTimeout(searchDebounceTimer);
+
+  if (query.length < 2) {
+    hideSearchResults();
+    return;
+  }
+
+  searchResults.innerHTML = `<div class="search-loading">Buscando…</div>`;
+  showSearchResults();
+
+  searchDebounceTimer = setTimeout(async () => {
+    const items = await fetchSuggestions(query);
+    renderSuggestions(items);
+  }, SEARCH_DEBOUNCE_MS);
+});
+
+// Chiudi suggerimenti se clicchi fuori
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-wrapper")) {
+    hideSearchResults();
+  }
+});
+
+// Bottone "Mi ubicación" — torna al GPS
+btnLocate.addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    alert("Geolocalización no disponible");
+    return;
+  }
+  btnLocate.classList.add("searching");
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userCenter = [pos.coords.latitude, pos.coords.longitude];
+      activeCenter = userCenter;
+      searchInput.value = "";
+      if (searchMarker) {
+        map.removeLayer(searchMarker);
+        searchMarker = null;
+      }
+      map.setView(userCenter, DEFAULT_ZOOM);
+      btnLocate.classList.remove("searching");
+      recomputeNearby();
+    },
+    () => {
+      btnLocate.classList.remove("searching");
+      alert("No se pudo obtener tu ubicación");
+    },
+    { timeout: 5000 }
+  );
+});
