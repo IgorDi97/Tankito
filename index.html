@@ -2,50 +2,78 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0e14" />
   <title>Tankito — Ahorra en gasolina</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <div class="header-top">
-      <h1>⛽ Tankito</h1>
-      <p id="status">Cargando gasolineras…</p>
-    </div>
-
-    <div class="search-row">
+    <div class="header-row search-row">
+      <div class="brand">
+        <span class="brand-icon">⛽</span>
+        <span class="brand-name">Tankito</span>
+      </div>
       <div class="search-wrapper">
+        <span class="search-icon">🔍</span>
         <input
           id="search-input"
           type="text"
-          placeholder="🔍 Buscar ciudad o dirección…"
+          placeholder="Buscar gasolinera o ciudad…"
           autocomplete="off"
           spellcheck="false"
         />
         <div id="search-results" class="hidden"></div>
       </div>
-      <button id="btn-locate" title="Mi ubicación">📍</button>
     </div>
 
-    <div class="header-controls">
-      <select id="fuel-selector">
-        <option value="gasolina95">Gasolina 95</option>
-        <option value="gasolina98">Gasolina 98</option>
-        <option value="diesel">Diésel</option>
-        <option value="dieselPremium">Diésel Premium</option>
-        <option value="glp">GLP</option>
-      </select>
+    <div class="header-row controls-row">
       <div class="view-toggle">
-        <button id="btn-map" class="active">🗺️ Mapa</button>
-        <button id="btn-list">📋 Lista</button>
-        <button id="btn-fav">⭐ <span id="fav-count">0</span></button>
+        <button id="btn-map" class="chip active">
+          <span class="chip-icon">🗺️</span>
+          <span class="chip-label">Mapa</span>
+        </button>
+        <button id="btn-list" class="chip">
+          <span class="chip-icon">📋</span>
+          <span class="chip-label">Lista</span>
+        </button>
+        <button id="btn-fav" class="chip">
+          <span class="chip-icon">⭐</span>
+          <span class="chip-label">Favoritos</span>
+          <span id="fav-count" class="chip-badge">0</span>
+        </button>
       </div>
+      <div class="fuel-wrapper">
+        <select id="fuel-selector">
+          <option value="gasolina95">Gasolina 95</option>
+          <option value="gasolina98">Gasolina 98</option>
+          <option value="diesel">Diésel</option>
+          <option value="dieselPremium">Diésel Premium</option>
+          <option value="glp">GLP</option>
+        </select>
+        <span class="fuel-arrow">▾</span>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span id="status">Cargando gasolineras…</span>
     </div>
   </header>
 
-  <div id="map"></div>
-  <div id="list-view" class="hidden"></div>
+  <main>
+    <div id="map"></div>
+    <div id="list-view" class="hidden"></div>
+    <button id="btn-locate" title="Mi ubicación" aria-label="Mi ubicación">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+      </svg>
+    </button>
+  </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
