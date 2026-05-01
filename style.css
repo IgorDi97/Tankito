@@ -1,4 +1,4 @@
-/* ====== TANKITO — Design v0.6 (Branded Accent logo) ====== */
+/* ====== TANKITO — Design v0.7 (logo Space Grotesk) ====== */
 
 :root {
   /* Palette */
@@ -73,7 +73,7 @@ header {
   gap: 10px;
 }
 
-/* === Brand === */
+/* === Brand (Space Grotesk) === */
 .brand {
   display: flex;
   align-items: center;
@@ -86,14 +86,13 @@ header {
   filter: drop-shadow(0 0 10px var(--brand-glow));
 }
 
- .brand-name {
-  font-size: 1.1rem;
+.brand-name {
+  font-size: 1.2rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
-  font-family: 'Inter', sans-serif;
+  letter-spacing: -0.02em;
+  font-family: 'Space Grotesk', sans-serif;
   display: inline-flex;
   align-items: baseline;
-}
 }
 
 .brand-prefix {
