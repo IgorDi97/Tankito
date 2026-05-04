@@ -1,4 +1,4 @@
-/* ====== TANKITO — Design v0.7 (logo Space Grotesk) ====== */
+/* ====== TANKITO — Design v0.8 (logo gradient semaforico) ====== */
 
 :root {
   /* Palette */
@@ -73,34 +73,37 @@ header {
   gap: 10px;
 }
 
-/* === Brand (Space Grotesk) === */
+/* === Brand (gradient semaforico) === */
 .brand {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 .brand-icon {
-  font-size: 1.25rem;
-  filter: drop-shadow(0 0 10px var(--brand-glow));
+  font-size: 1.5rem;
+  filter: drop-shadow(0 0 12px var(--brand-glow));
 }
 
 .brand-name {
-  font-size: 1.2rem;
+  font-size: 1.55rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   font-family: 'Space Grotesk', sans-serif;
-  display: inline-flex;
-  align-items: baseline;
-}
-
-.brand-prefix {
-  color: var(--text-primary);
-}
-
-.brand-suffix {
-  color: var(--brand);
+  background: linear-gradient(
+    90deg,
+    #00d97e 0%,
+    #00d97e 25%,
+    #fbbf24 55%,
+    #f87171 90%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  display: inline-block;
+  line-height: 1;
 }
 
 /* === Search === */
@@ -599,116 +602,4 @@ main {
   padding: 10px 0;
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-}
-
-.station-popup .price-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 2px 0;
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.station-popup .price-row.active {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.station-popup .price-value {
-  font-weight: 700;
-}
-
-.station-popup .price-row.active .price-value {
-  color: var(--brand);
-}
-
-.station-popup .navigate-btn {
-  display: block;
-  width: 100%;
-  padding: 9px 12px;
-  background: var(--brand);
-  color: var(--bg-deep);
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  font-weight: 700;
-  font-family: inherit;
-  text-align: center;
-  text-decoration: none;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.station-popup .navigate-btn:hover {
-  background: #00f08c;
-  box-shadow: var(--shadow-brand);
-}
-
-/* ====== LEAFLET MARKERS / CONTAINER ====== */
-.leaflet-container {
-  background: var(--bg-deep) !important;
-  font-family: 'Inter', sans-serif !important;
-}
-
-.leaflet-control-attribution {
-  background: rgba(10, 14, 20, 0.7) !important;
-  color: var(--text-tertiary) !important;
-  font-size: 10px !important;
-  padding: 2px 6px !important;
-}
-
-.leaflet-control-attribution a {
-  color: var(--text-secondary) !important;
-}
-
-.leaflet-control-zoom {
-  border: none !important;
-  box-shadow: var(--shadow-md) !important;
-}
-
-.leaflet-control-zoom a {
-  background: var(--bg-elevated) !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--border-soft) !important;
-  width: 34px !important;
-  height: 34px !important;
-  line-height: 32px !important;
-  font-size: 18px !important;
-}
-
-.leaflet-control-zoom a:hover {
-  background: var(--brand) !important;
-  color: var(--bg-deep) !important;
-}
-
-/* ====== RESPONSIVE — MOBILE ====== */
-@media (max-width: 600px) {
-  header {
-    padding: 10px 12px 8px;
-  }
-
-  .brand-name {
-    display: none;
-  }
-
-  .brand-icon {
-    font-size: 1.5rem;
-  }
-
-  .controls-row {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .controls-row::-webkit-scrollbar { display: none; }
-
-  #fuel-selector {
-    font-size: 0.75rem;
-  }
-
-  #btn-locate {
-    bottom: 20px;
-    right: 14px;
-  }
 }
