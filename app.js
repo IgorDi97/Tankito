@@ -1,12 +1,6 @@
-// ====== Tankito — app.js v0.7 ======
-// Novità v0.7:
-//   - Cluster pin con leaflet.markercluster
-//   - Disattivati a zoom >= 13 (vista quartiere/città intatta)
-//   - Cluster verde→arancione→rosso per densità (palette brand)
-//
-// Da v0.6:
-//   - Popup ricco con tutti i prezzi + carburante selezionato evidenziato
-//   - Distanza utente↔stazione (Haversine) in popup, lista, favoriti
+// ====== Tankito — app.js v0.6.1 ======
+// Versione stabile: popup ricco + distanza Haversine
+// Rollback dei cluster (markercluster non aggiungeva valore per il use case reale)
 
 const DATA_URL = "/data/latest.json";
 const FAV_KEY = "tankito_favorites_v1";
@@ -162,25 +156,7 @@ function priceListHtml(allPrices, selectedFuel, selectedColor) {
 // === Render mappa ===
 function renderMap(stations) {
   if (markersLayer) markersLayer.remove();
-
-  // === NEW v0.7: cluster intelligente ===
-  markersLayer = L.markerClusterGroup({
-    disableClusteringAtZoom: 13,
-    spiderfyOnMaxZoom: false,
-    showCoverageOnHover: false,
-    maxClusterRadius: 50,
-    iconCreateFunction: function (cluster) {
-      const count = cluster.getChildCount();
-      let size = "small";
-      if (count >= 100) size = "large";
-      else if (count >= 20) size = "medium";
-      return L.divIcon({
-        html: `<div class="cluster-inner"><span>${count}</span></div>`,
-        className: `tankito-cluster tankito-cluster-${size}`,
-        iconSize: L.point(40, 40)
-      });
-    }
-  }).addTo(map);
+  markersLayer = L.layerGroup().addTo(map);
 
   const q = computeQuartiles(stations);
 
