@@ -1,8 +1,8 @@
-// ====== Tankito — app.js v0.5 ======
-// Novità v0.5: distanza utente↔stazione (Haversine)
-//   - mostrata nei popup mappa
-//   - mostrata nelle card della vista lista
-//   - mostrata nella vista favoriti
+// ====== Tankito — app.js v0.6 ======
+// Novità v0.6:
+//   - Popup ricco: mostra TUTTI i prezzi disponibili
+//   - Carburante selezionato evidenziato in colore (percentile)
+//   - Distanza utente↔stazione (Haversine) nei popup, lista, favoriti
 
 const DATA_URL = "/data/latest.json";
 const FAV_KEY = "tankito_favorites_v1";
@@ -25,21 +25,24 @@ const FUEL_LABELS = {
   glp: "GLP"
 };
 
+// Ordine in cui mostrare i prezzi nel popup ricco
+const FUEL_DISPLAY_ORDER = ["gasolina95", "gasolina98", "diesel", "dieselPremium", "glp"];
+
 // === Stato applicazione ===
 let allStations = [];
 let visibleStations = [];
-let userLatLng = null;       // posizione effettiva utente o ricerca
-let actualUserLatLng = null; // GPS reale (per il bottone "Mi ubicación")
+let userLatLng = null;
+let actualUserLatLng = null;
 let currentFuel = "gasolina95";
 let map = null;
 let markersLayer = null;
 let userMarker = null;
 let favorites = loadFavorites();
-let viewMode = "map"; // "map" | "list" | "fav"
+let viewMode = "map";
 
-// === NEW v0.5: Haversine — distanza in km tra due punti lat/lng ===
+// === Haversine (distanza in km tra 2 punti lat/lng) ===
 function distanceKm(lat1, lon1, lat2, lon2) {
-  const R = 6371; // raggio Terra in km
+  const R = 6371;
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -50,7 +53,6 @@ function distanceKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// === NEW v0.5: formattazione user-friendly della distanza ===
 function formatDistance(km) {
   if (km == null || isNaN(km)) return "";
   if (km < 1) return `${Math.round(km * 1000)} m`;
@@ -88,7 +90,17 @@ function parsePrice(str) {
   return parseFloat(String(str).replace(",", "."));
 }
 
-// === Filtro stazioni con prezzo del carburante selezionato e dentro raggio ===
+// === Estrai tutti i prezzi disponibili da una stazione ===
+function extractAllPrices(station) {
+  const prices = {};
+  for (const fuel of FUEL_DISPLAY_ORDER) {
+    const p = parsePrice(station[FUEL_KEYS[fuel]]);
+    if (p) prices[fuel] = p;
+  }
+  return prices;
+}
+
+// === Filtro stazioni dentro raggio + ha prezzo del carburante selezionato ===
 function filterStations(stations, fuel, center, radiusKm) {
   return stations
     .map((s) => {
@@ -98,11 +110,11 @@ function filterStations(stations, fuel, center, radiusKm) {
       if (!price || !lat || !lng) return null;
       const dist = distanceKm(center[0], center[1], lat, lng);
       if (dist > radiusKm) return null;
-      // === NEW v0.5: distanza dall'utente reale (se diversa da center) ===
       const userDist = actualUserLatLng
         ? distanceKm(actualUserLatLng[0], actualUserLatLng[1], lat, lng)
         : dist;
-      return { ...s, _price: price, _lat: lat, _lng: lng, _dist: dist, _userDist: userDist };
+      const allPrices = extractAllPrices(s);
+      return { ...s, _price: price, _lat: lat, _lng: lng, _dist: dist, _userDist: userDist, _allPrices: allPrices };
     })
     .filter(Boolean);
 }
@@ -119,9 +131,29 @@ function computeQuartiles(stations) {
 }
 
 function priceColor(price, q) {
-  if (price <= q.p33) return "#4ade80"; // verde
-  if (price <= q.p66) return "#facc15"; // giallo
-  return "#f87171"; // rosso
+  if (price <= q.p33) return "#4ade80";
+  if (price <= q.p66) return "#facc15";
+  return "#f87171";
+}
+
+// === Genera HTML della tabella prezzi nel popup ===
+function priceListHtml(allPrices, selectedFuel, selectedColor) {
+  const rows = FUEL_DISPLAY_ORDER
+    .filter((fuel) => allPrices[fuel] != null)
+    .map((fuel) => {
+      const isSelected = fuel === selectedFuel;
+      const value = allPrices[fuel].toFixed(3);
+      const color = isSelected ? selectedColor : "var(--text-tertiary)";
+      const weight = isSelected ? "600" : "400";
+      return `
+        <div class="popup-price-row ${isSelected ? "is-selected" : ""}">
+          <span class="popup-price-label" style="color:${color}; font-weight:${weight}">${FUEL_LABELS[fuel]}</span>
+          <span class="popup-price-value" style="color:${color}; font-weight:${weight}">${value} €/L</span>
+        </div>
+      `;
+    })
+    .join("");
+  return `<div class="popup-prices">${rows}</div>`;
 }
 
 // === Render mappa ===
@@ -142,22 +174,21 @@ function renderMap(stations) {
     });
 
     const fav = isFavorite(s.IDEESS);
-    const distText = formatDistance(s._userDist); // === NEW v0.5
+    const distText = formatDistance(s._userDist);
 
     const popupHtml = `
       <div class="popup">
-        <div class="popup-name">${s["Rótulo"] || "Gasolinera"}</div>
+        <div class="popup-header">
+          <div class="popup-name">${s["Rótulo"] || "Gasolinera"}</div>
+          <button class="popup-fav-btn ${fav ? "is-fav" : ""}" data-id="${s.IDEESS}" title="${fav ? "Quitar de favoritos" : "Guardar como favorito"}">
+            ${fav ? "★" : "☆"}
+          </button>
+        </div>
         <div class="popup-addr">${s["Dirección"] || ""}</div>
         ${distText ? `<div class="popup-dist">📍 a ${distText} de ti</div>` : ""}
-        <div class="popup-price">
-          <span class="popup-fuel">${FUEL_LABELS[currentFuel]}</span>
-          <span class="popup-value" style="color:${color}">${s._price.toFixed(3)} €/L</span>
-        </div>
+        ${priceListHtml(s._allPrices, currentFuel, color)}
         <div class="popup-actions">
-          <a href="https://www.google.com/maps/dir/?api=1&destination=${s._lat},${s._lng}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
-          <button class="popup-fav-btn ${fav ? "is-fav" : ""}" data-id="${s.IDEESS}">
-            ${fav ? "★ Favorito" : "☆ Guardar"}
-          </button>
+          <a class="popup-link" href="https://www.google.com/maps/dir/?api=1&destination=${s._lat},${s._lng}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
         </div>
       </div>
     `;
@@ -165,7 +196,6 @@ function renderMap(stations) {
     markersLayer.addLayer(marker);
   });
 
-  // delegation per il pulsante favoriti dentro il popup
   map.on("popupopen", (e) => {
     const btn = e.popup._contentNode.querySelector(".popup-fav-btn");
     if (!btn) return;
@@ -173,7 +203,8 @@ function renderMap(stations) {
       const id = btn.dataset.id;
       toggleFavorite(id);
       btn.classList.toggle("is-fav");
-      btn.textContent = isFavorite(id) ? "★ Favorito" : "☆ Guardar";
+      btn.textContent = isFavorite(id) ? "★" : "☆";
+      btn.title = isFavorite(id) ? "Quitar de favoritos" : "Guardar como favorito";
       if (viewMode === "fav") refreshView();
     };
   });
@@ -193,7 +224,7 @@ function renderList(stations) {
     .map((s) => {
       const color = priceColor(s._price, q);
       const fav = isFavorite(s.IDEESS);
-      const distText = formatDistance(s._userDist); // === NEW v0.5
+      const distText = formatDistance(s._userDist);
       return `
         <article class="station-card" data-id="${s.IDEESS}">
           <div class="card-main">
@@ -264,7 +295,6 @@ function refreshView() {
   }
 }
 
-// === Apply filter (chiamato quando cambia: posizione, fuel, dati) ===
 function applyFilter() {
   if (!userLatLng || allStations.length === 0) return;
   visibleStations = filterStations(allStations, currentFuel, userLatLng, RADIUS_KM);
@@ -309,7 +339,6 @@ function initMapAt(center) {
     maxZoom: 19
   }).addTo(map);
 
-  // marker utente
   if (userMarker) userMarker.remove();
   userMarker = L.circleMarker(center, {
     radius: 7,
@@ -322,7 +351,6 @@ function initMapAt(center) {
   loadData();
 }
 
-// === Caricamento dati ===
 async function loadData() {
   try {
     const res = await fetch(DATA_URL, { cache: "no-cache" });
@@ -385,7 +413,6 @@ async function doSearch(q) {
         const lat = parseFloat(item.dataset.lat);
         const lon = parseFloat(item.dataset.lon);
         userLatLng = [lat, lon];
-        // userMarker resta sull'utente reale, non sulla ricerca
         if (map) {
           map.setView([lat, lon], 13);
         }
@@ -399,7 +426,6 @@ async function doSearch(q) {
   }
 }
 
-// === Bottone "Mi ubicación" ===
 function setupLocateBtn() {
   document.getElementById("btn-locate").onclick = () => {
     if (actualUserLatLng) {
