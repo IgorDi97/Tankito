@@ -1,8 +1,8 @@
-name: Snapshot Ministerio
+name: Tankito Bot - Snapshot prezzi
 
 on:
   schedule:
-    - cron: - cron: '0 */2 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 permissions:
@@ -29,15 +29,15 @@ jobs:
             echo "File vuoto, errore"
             exit 1
           fi
-          echo "Snapshot OK — size: $(wc -c < data/latest.json) bytes"
+          echo "Snapshot OK - size: $(wc -c < data/latest.json) bytes"
 
-      - name: Commit e push snapshot
+      - name: Commit e push se ci sono cambiamenti
         run: |
           git config user.name "Tankito Bot"
-          git config user.email "bot@tankito.app"
+          git config user.email "tankito-bot@users.noreply.github.com"
           git add data/latest.json
           if git diff --staged --quiet; then
-            echo "Nessuna modifica, skip commit"
+            echo "Nessun cambiamento, skip commit"
           else
             git commit -m "Snapshot $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
