@@ -1,499 +1,431 @@
-// ====== Tankito — v0.5 ======
-// Feature: ricerca per città/indirizzo + Mi ubicación
+// ====== Tankito — app.js v0.5 ======
+// Novità v0.5: distanza utente↔stazione (Haversine)
+//   - mostrata nei popup mappa
+//   - mostrata nelle card della vista lista
+//   - mostrata nella vista favoriti
 
-const SNAPSHOT_URL = "data/latest.json";
-const DEFAULT_CENTER = [39.4699, -0.3763]; // Valencia
-const DEFAULT_ZOOM = 12;
+const DATA_URL = "/data/latest.json";
+const FAV_KEY = "tankito_favorites_v1";
+const VALENCIA = [39.4699, -0.3763];
 const RADIUS_KM = 30;
-const FAV_STORAGE_KEY = "tankito_favorites_v1";
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-const SEARCH_DEBOUNCE_MS = 350;
 
-const FUEL_TYPES = {
-  gasolina95:    { label: "Gasolina 95",      field: "Precio Gasolina 95 E5" },
-  gasolina98:    { label: "Gasolina 98",      field: "Precio Gasolina 98 E5" },
-  diesel:        { label: "Diésel",           field: "Precio Gasoleo A" },
-  dieselPremium: { label: "Diésel Premium",   field: "Precio Gasoleo Premium" },
-  glp:           { label: "GLP",              field: "Precio Gases licuados del petróleo" },
+const FUEL_KEYS = {
+  gasolina95: "Precio Gasolina 95 E5",
+  gasolina98: "Precio Gasolina 98 E5",
+  diesel: "Precio Gasoleo A",
+  dieselPremium: "Precio Gasoleo Premium",
+  glp: "Precio Gases licuados del petróleo"
 };
 
-// Stato
-let userCenter = DEFAULT_CENTER;        // posizione GPS reale dell'utente
-let activeCenter = DEFAULT_CENTER;      // centro attuale (può essere quello cercato)
-let nearbyStations = [];
-let favoriteStations = [];
-let rawStationsIndex = {};
-let allStationsRaw = [];                // tutte le stazioni grezze (per ricalcoli rapidi)
+const FUEL_LABELS = {
+  gasolina95: "Gasolina 95",
+  gasolina98: "Gasolina 98",
+  diesel: "Diésel",
+  dieselPremium: "Diésel Premium",
+  glp: "GLP"
+};
+
+// === Stato applicazione ===
+let allStations = [];
+let visibleStations = [];
+let userLatLng = null;       // posizione effettiva utente o ricerca
+let actualUserLatLng = null; // GPS reale (per il bottone "Mi ubicación")
+let currentFuel = "gasolina95";
+let map = null;
 let markersLayer = null;
-let searchMarker = null;                // marker blu sulla posizione cercata
-let selectedFuel = "gasolina95";
-let currentView = "map";
-let searchDebounceTimer = null;
+let userMarker = null;
+let favorites = loadFavorites();
+let viewMode = "map"; // "map" | "list" | "fav"
 
-// DOM
-const statusEl = document.getElementById("status");
-const fuelSelector = document.getElementById("fuel-selector");
-const btnMap = document.getElementById("btn-map");
-const btnList = document.getElementById("btn-list");
-const btnFav = document.getElementById("btn-fav");
-const favCountEl = document.getElementById("fav-count");
-const listView = document.getElementById("list-view");
-const mapEl = document.getElementById("map");
-const searchInput = document.getElementById("search-input");
-const searchResults = document.getElementById("search-results");
-const btnLocate = document.getElementById("btn-locate");
+// === NEW v0.5: Haversine — distanza in km tra due punti lat/lng ===
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // raggio Terra in km
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
-// Mappa
-const map = L.map("map", { zoomControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  attribution: "&copy; OpenStreetMap &copy; CARTO",
-  maxZoom: 19,
-}).addTo(map);
+// === NEW v0.5: formattazione user-friendly della distanza ===
+function formatDistance(km) {
+  if (km == null || isNaN(km)) return "";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
+}
 
-// ---- Favoriti ----
-function getFavoriteIds() {
+// === Favoriti ===
+function loadFavorites() {
   try {
-    const raw = localStorage.getItem(FAV_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
   } catch {
     return [];
   }
 }
-function saveFavoriteIds(ids) { localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(ids)); }
-function isFavorite(id) { return getFavoriteIds().includes(id); }
+function saveFavorites() {
+  localStorage.setItem(FAV_KEY, JSON.stringify(favorites));
+  document.getElementById("fav-count").textContent = favorites.length;
+}
+function isFavorite(id) {
+  return favorites.includes(id);
+}
 function toggleFavorite(id) {
-  const ids = getFavoriteIds();
-  const idx = ids.indexOf(id);
-  if (idx >= 0) ids.splice(idx, 1);
-  else ids.push(id);
-  saveFavoriteIds(ids);
-  refreshFavorites();
-  updateFavCount();
-}
-function refreshFavorites() {
-  const ids = getFavoriteIds();
-  favoriteStations = ids.map((id) => rawStationsIndex[id]).filter((s) => s !== undefined);
-}
-function updateFavCount() { favCountEl.textContent = getFavoriteIds().length; }
-
-// ---- Geolocalizzazione iniziale ----
-if (navigator.geolocation) {
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      userCenter = [pos.coords.latitude, pos.coords.longitude];
-      activeCenter = userCenter;
-      map.setView(userCenter, DEFAULT_ZOOM);
-      loadStations();
-    },
-    () => loadStations(),
-    { timeout: 5000 }
-  );
-} else {
-  loadStations();
-}
-
-// ---- Utilità ----
-function distanceKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-function parseNum(str) {
-  if (!str || typeof str !== "string") return null;
-  const n = parseFloat(str.replace(",", "."));
-  return isNaN(n) ? null : n;
-}
-function priceColor(price, minPrice, maxPrice) {
-  if (price === null) return "#555";
-  if (maxPrice === minPrice) return "#4ade80";
-  const ratio = (price - minPrice) / (maxPrice - minPrice);
-  if (ratio <= 0.33) return "#4ade80";
-  if (ratio <= 0.66) return "#facc15";
-  return "#f87171";
-}
-function navigationUrl(lat, lng) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
-}
-
-// ---- Caricamento dati ----
-async function loadStations() {
-  try {
-    statusEl.textContent = "Cargando datos…";
-    const res = await fetch(SNAPSHOT_URL);
-    if (!res.ok) throw new Error("No se pudo cargar el snapshot");
-    const data = await res.json();
-    allStationsRaw = data.ListaEESSPrecio || [];
-    recomputeNearby();
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Error al cargar los datos";
-  }
-}
-
-// Ricalcola le stazioni vicine in base al centro attivo
-function recomputeNearby() {
-  const [lat, lng] = activeCenter;
-  nearbyStations = [];
-  rawStationsIndex = {};
-
-  for (const s of allStationsRaw) {
-    const slat = parseNum(s["Latitud"]);
-    const slng = parseNum(s["Longitud (WGS84)"]);
-    if (slat === null || slng === null) continue;
-
-    const id = s["IDEESS"];
-    if (!id) continue;
-
-    const prices = {};
-    for (const key in FUEL_TYPES) {
-      prices[key] = parseNum(s[FUEL_TYPES[key].field]);
-    }
-
-    const station = {
-      id, lat: slat, lng: slng, prices,
-      name: s["Rótulo"] || "Estación",
-      address: s["Dirección"] || "",
-    };
-
-    rawStationsIndex[id] = station;
-
-    const d = distanceKm(lat, lng, slat, slng);
-    if (d <= RADIUS_KM) {
-      nearbyStations.push({ ...station, distance: d });
-    }
-  }
-
-  refreshFavorites();
-  updateFavCount();
-  renderAll();
-}
-
-// ---- Rendering (immutato dalla v0.4) ----
-function stationsForCurrentView() {
-  if (currentView === "fav") {
-    const [lat, lng] = activeCenter;
-    return favoriteStations.map((s) => ({
-      ...s, distance: distanceKm(lat, lng, s.lat, s.lng),
-    }));
-  }
-  return nearbyStations;
-}
-
-function renderAll() {
-  const fuelKey = selectedFuel;
-  const source = stationsForCurrentView();
-  const withFuel = source.filter((s) => s.prices[fuelKey] !== null);
-
-  if (currentView === "fav") {
-    statusEl.textContent = `${favoriteStations.length} favoritos · ${FUEL_TYPES[fuelKey].label}`;
+  if (isFavorite(id)) {
+    favorites = favorites.filter((f) => f !== id);
   } else {
-    statusEl.textContent = `${withFuel.length} gasolineras · ${FUEL_TYPES[fuelKey].label}`;
+    favorites.push(id);
   }
-
-  if (currentView === "fav" && favoriteStations.length === 0) {
-    if (markersLayer) map.removeLayer(markersLayer);
-    listView.innerHTML = `
-      <div class="empty-favs">
-        <span class="emoji">⭐</span>
-        Todavía no tienes favoritos.<br>
-        Pulsa la estrella en cualquier gasolinera para añadirla aquí.
-      </div>`;
-    return;
-  }
-
-  if (withFuel.length === 0) {
-    if (markersLayer) map.removeLayer(markersLayer);
-    listView.innerHTML = `<p style="text-align:center;color:#8b95a7;padding:40px 16px;">Ninguna gasolinera ofrece ${FUEL_TYPES[fuelKey].label} en este momento.</p>`;
-    return;
-  }
-
-  const prices = withFuel.map((s) => s.prices[fuelKey]);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-
-  renderMap(withFuel, minPrice, maxPrice, fuelKey);
-  renderList(withFuel, fuelKey);
+  saveFavorites();
 }
 
-function buildPopupHtml(s, fuelKey) {
-  const priceRows = Object.keys(FUEL_TYPES).map((k) => {
-    const p = s.prices[k];
-    if (p === null) return "";
-    const isActive = k === fuelKey;
-    return `<div class="price-row ${isActive ? "active" : ""}">
-      <span>${FUEL_TYPES[k].label}</span>
-      <span class="price-value">${p.toFixed(3)} €/L</span>
-    </div>`;
-  }).join("");
-
-  const navUrl = navigationUrl(s.lat, s.lng);
-  const favActive = isFavorite(s.id);
-
-  return `
-    <div class="station-popup" data-station-id="${s.id}">
-      <div class="popup-header">
-        <h3>${s.name}</h3>
-        <button class="fav-btn ${favActive ? "active" : ""}" data-fav-id="${s.id}" title="Favorito">
-          ${favActive ? "★" : "☆"}
-        </button>
-      </div>
-      <div class="address">${s.address}</div>
-      <div class="prices">${priceRows}</div>
-      <a class="navigate-btn" href="${navUrl}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
-    </div>`;
+// === Parsing prezzo ===
+function parsePrice(str) {
+  if (!str || str === "") return null;
+  return parseFloat(String(str).replace(",", "."));
 }
 
-function renderMap(stations, minPrice, maxPrice, fuelKey) {
-  if (markersLayer) map.removeLayer(markersLayer);
-  markersLayer = L.layerGroup();
+// === Filtro stazioni con prezzo del carburante selezionato e dentro raggio ===
+function filterStations(stations, fuel, center, radiusKm) {
+  return stations
+    .map((s) => {
+      const price = parsePrice(s[FUEL_KEYS[fuel]]);
+      const lat = parsePrice(s.Latitud);
+      const lng = parsePrice(s["Longitud (WGS84)"]);
+      if (!price || !lat || !lng) return null;
+      const dist = distanceKm(center[0], center[1], lat, lng);
+      if (dist > radiusKm) return null;
+      // === NEW v0.5: distanza dall'utente reale (se diversa da center) ===
+      const userDist = actualUserLatLng
+        ? distanceKm(actualUserLatLng[0], actualUserLatLng[1], lat, lng)
+        : dist;
+      return { ...s, _price: price, _lat: lat, _lng: lng, _dist: dist, _userDist: userDist };
+    })
+    .filter(Boolean);
+}
 
-  for (const s of stations) {
-    const price = s.prices[fuelKey];
-    const color = priceColor(price, minPrice, maxPrice);
+// === Calcolo percentili per colorazione ===
+function computeQuartiles(stations) {
+  const prices = stations.map((s) => s._price).sort((a, b) => a - b);
+  const n = prices.length;
+  if (n === 0) return { p33: 0, p66: 0 };
+  return {
+    p33: prices[Math.floor(n * 0.33)],
+    p66: prices[Math.floor(n * 0.66)]
+  };
+}
 
-    const marker = L.circleMarker([s.lat, s.lng], {
-      radius: 8, fillColor: color, color: "#0f1419",
-      weight: 1.5, fillOpacity: 0.9,
+function priceColor(price, q) {
+  if (price <= q.p33) return "#4ade80"; // verde
+  if (price <= q.p66) return "#facc15"; // giallo
+  return "#f87171"; // rosso
+}
+
+// === Render mappa ===
+function renderMap(stations) {
+  if (markersLayer) markersLayer.remove();
+  markersLayer = L.layerGroup().addTo(map);
+
+  const q = computeQuartiles(stations);
+
+  stations.forEach((s) => {
+    const color = priceColor(s._price, q);
+    const marker = L.circleMarker([s._lat, s._lng], {
+      radius: 9,
+      fillColor: color,
+      color: "#0a0e14",
+      weight: 2,
+      fillOpacity: 0.95
     });
 
-    marker.bindPopup(buildPopupHtml(s, fuelKey));
-    markersLayer.addLayer(marker);
-  }
-  markersLayer.addTo(map);
-}
+    const fav = isFavorite(s.IDEESS);
+    const distText = formatDistance(s._userDist); // === NEW v0.5
 
-function renderList(stations, fuelKey) {
-  const sorted = [...stations].sort((a, b) => a.prices[fuelKey] - b.prices[fuelKey]);
-
-  listView.innerHTML = sorted.map((s, i) => {
-    const price = s.prices[fuelKey];
-    const navUrl = navigationUrl(s.lat, s.lng);
-    const favActive = isFavorite(s.id);
-    return `
-      <div class="list-item">
-        <div class="rank">${i + 1}</div>
-        <div class="info" data-lat="${s.lat}" data-lng="${s.lng}">
-          <div class="name">${s.name}</div>
-          <div class="address">${s.address}</div>
-          <div class="distance">${s.distance.toFixed(1)} km</div>
+    const popupHtml = `
+      <div class="popup">
+        <div class="popup-name">${s["Rótulo"] || "Gasolinera"}</div>
+        <div class="popup-addr">${s["Dirección"] || ""}</div>
+        ${distText ? `<div class="popup-dist">📍 a ${distText} de ti</div>` : ""}
+        <div class="popup-price">
+          <span class="popup-fuel">${FUEL_LABELS[currentFuel]}</span>
+          <span class="popup-value" style="color:${color}">${s._price.toFixed(3)} €/L</span>
         </div>
-        <div class="price-and-nav">
-          <button class="fav-btn ${favActive ? "active" : ""}" data-fav-id="${s.id}" title="Favorito">
-            ${favActive ? "★" : "☆"}
+        <div class="popup-actions">
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${s._lat},${s._lng}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
+          <button class="popup-fav-btn ${fav ? "is-fav" : ""}" data-id="${s.IDEESS}">
+            ${fav ? "★ Favorito" : "☆ Guardar"}
           </button>
-          <div class="price">${price.toFixed(3)} €/L</div>
-          <a class="nav-btn" href="${navUrl}" target="_blank" rel="noopener" title="Cómo llegar">🧭</a>
         </div>
       </div>
     `;
-  }).join("");
-
-  listView.querySelectorAll(".list-item .info").forEach((el) => {
-    el.addEventListener("click", () => {
-      const lat = parseFloat(el.dataset.lat);
-      const lng = parseFloat(el.dataset.lng);
-      showMapView();
-      map.setView([lat, lng], 16);
-    });
+    marker.bindPopup(popupHtml);
+    markersLayer.addLayer(marker);
   });
 
-  listView.querySelectorAll(".fav-btn").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = el.dataset.favId;
+  // delegation per il pulsante favoriti dentro il popup
+  map.on("popupopen", (e) => {
+    const btn = e.popup._contentNode.querySelector(".popup-fav-btn");
+    if (!btn) return;
+    btn.onclick = () => {
+      const id = btn.dataset.id;
       toggleFavorite(id);
-      renderAll();
-    });
+      btn.classList.toggle("is-fav");
+      btn.textContent = isFavorite(id) ? "★ Favorito" : "☆ Guardar";
+      if (viewMode === "fav") refreshView();
+    };
   });
 }
 
-map.on("popupopen", (e) => {
-  const popupNode = e.popup.getElement();
-  if (!popupNode) return;
-  const favBtn = popupNode.querySelector(".fav-btn");
-  if (!favBtn) return;
-  favBtn.addEventListener("click", () => {
-    const id = favBtn.dataset.favId;
-    toggleFavorite(id);
-    const station = rawStationsIndex[id];
-    if (station) e.popup.setContent(buildPopupHtml(station, selectedFuel));
-    renderAll();
-  });
-});
-
-// ---- Toggle vista ----
-function showMapView() {
-  currentView = "map";
-  mapEl.classList.remove("hidden");
-  listView.classList.add("hidden");
-  btnMap.classList.add("active");
-  btnList.classList.remove("active");
-  btnFav.classList.remove("active");
-  setTimeout(() => map.invalidateSize(), 50);
-  renderAll();
-}
-function showListView() {
-  currentView = "list";
-  mapEl.classList.add("hidden");
-  listView.classList.remove("hidden");
-  btnMap.classList.remove("active");
-  btnList.classList.add("active");
-  btnFav.classList.remove("active");
-  renderAll();
-}
-function showFavView() {
-  currentView = "fav";
-  mapEl.classList.add("hidden");
-  listView.classList.remove("hidden");
-  btnMap.classList.remove("active");
-  btnList.classList.remove("active");
-  btnFav.classList.add("active");
-  renderAll();
-}
-btnMap.addEventListener("click", showMapView);
-btnList.addEventListener("click", showListView);
-btnFav.addEventListener("click", showFavView);
-
-fuelSelector.addEventListener("change", (e) => {
-  selectedFuel = e.target.value;
-  renderAll();
-});
-
-// ====== NUOVO: Ricerca città/indirizzo ======
-
-function hideSearchResults() {
-  searchResults.classList.add("hidden");
-  searchResults.innerHTML = "";
-}
-
-function showSearchResults() {
-  searchResults.classList.remove("hidden");
-}
-
-async function fetchSuggestions(query) {
-  const url = `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=5&countrycodes=es`;
-  try {
-    const res = await fetch(url, {
-      headers: { "Accept-Language": "es" },
-    });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch (err) {
-    console.error("Errore Nominatim:", err);
-    return [];
-  }
-}
-
-function formatSuggestion(item) {
-  const a = item.address || {};
-  const main = a.city || a.town || a.village || a.suburb || a.neighbourhood || a.road || item.display_name.split(",")[0];
-  const subParts = [a.state, a.country].filter(Boolean);
-  return { main, sub: subParts.join(", "), display: item.display_name };
-}
-
-function renderSuggestions(items) {
-  if (items.length === 0) {
-    searchResults.innerHTML = `<div class="search-empty">Sin resultados</div>`;
-    showSearchResults();
+// === Render Lista ===
+function renderList(stations) {
+  const listEl = document.getElementById("list-view");
+  if (stations.length === 0) {
+    listEl.innerHTML = `<div class="empty">No hay estaciones en este filtro.</div>`;
     return;
   }
+  const q = computeQuartiles(stations);
+  const sorted = [...stations].sort((a, b) => a._price - b._price);
 
-  searchResults.innerHTML = items.map((item, idx) => {
-    const f = formatSuggestion(item);
-    return `
-      <div class="search-result" data-idx="${idx}">
-        <div class="result-main">${f.main}</div>
-        <div class="result-sub">${f.sub}</div>
-      </div>
-    `;
-  }).join("");
+  listEl.innerHTML = sorted
+    .map((s) => {
+      const color = priceColor(s._price, q);
+      const fav = isFavorite(s.IDEESS);
+      const distText = formatDistance(s._userDist); // === NEW v0.5
+      return `
+        <article class="station-card" data-id="${s.IDEESS}">
+          <div class="card-main">
+            <div class="card-name">${s["Rótulo"] || "Gasolinera"}</div>
+            <div class="card-addr">${s["Dirección"] || ""}</div>
+            ${distText ? `<div class="card-dist">📍 a ${distText}</div>` : ""}
+          </div>
+          <div class="card-side">
+            <div class="card-price" style="color:${color}">${s._price.toFixed(3)}<span>€/L</span></div>
+            <div class="card-actions">
+              <a class="card-btn" href="https://www.google.com/maps/dir/?api=1&destination=${s._lat},${s._lng}" target="_blank" rel="noopener">🧭</a>
+              <button class="card-btn fav-btn ${fav ? "is-fav" : ""}" data-id="${s.IDEESS}">${fav ? "★" : "☆"}</button>
+            </div>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 
-  searchResults.querySelectorAll(".search-result").forEach((el) => {
-    el.addEventListener("click", () => {
-      const idx = parseInt(el.dataset.idx);
-      const item = items[idx];
-      const f = formatSuggestion(item);
-      selectLocation(parseFloat(item.lat), parseFloat(item.lon), f.main);
-    });
+  listEl.querySelectorAll(".fav-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      toggleFavorite(id);
+      btn.classList.toggle("is-fav");
+      btn.textContent = isFavorite(id) ? "★" : "☆";
+      if (viewMode === "fav") refreshView();
+    };
   });
-
-  showSearchResults();
 }
 
-function selectLocation(lat, lng, label) {
-  activeCenter = [lat, lng];
-  searchInput.value = label;
-  hideSearchResults();
-  map.setView([lat, lng], DEFAULT_ZOOM);
-
-  // Marker speciale sulla posizione cercata
-  if (searchMarker) map.removeLayer(searchMarker);
-  searchMarker = L.marker([lat, lng], {
-    icon: L.divIcon({
-      className: "search-pin",
-      html: `<div style="font-size:28px;line-height:1;transform:translate(-50%,-100%);">📍</div>`,
-      iconSize: [28, 28],
-    }),
-  }).addTo(map);
-
-  showMapView();
-  recomputeNearby();
+// === Render Favoriti ===
+function renderFavorites() {
+  const favStations = allStations
+    .map((s) => {
+      const price = parsePrice(s[FUEL_KEYS[currentFuel]]);
+      const lat = parsePrice(s.Latitud);
+      const lng = parsePrice(s["Longitud (WGS84)"]);
+      if (!isFavorite(s.IDEESS)) return null;
+      const userDist = actualUserLatLng && lat && lng
+        ? distanceKm(actualUserLatLng[0], actualUserLatLng[1], lat, lng)
+        : null;
+      return { ...s, _price: price, _lat: lat, _lng: lng, _userDist: userDist };
+    })
+    .filter(Boolean);
+  renderList(favStations);
 }
 
-// Debounce: aspetta che l'utente smetta di digitare
-searchInput.addEventListener("input", (e) => {
-  const query = e.target.value.trim();
-  clearTimeout(searchDebounceTimer);
+// === Switch tra le 3 viste ===
+function setView(mode) {
+  viewMode = mode;
+  document.getElementById("btn-map").classList.toggle("active", mode === "map");
+  document.getElementById("btn-list").classList.toggle("active", mode === "list");
+  document.getElementById("btn-fav").classList.toggle("active", mode === "fav");
+  document.getElementById("map").classList.toggle("hidden", mode !== "map");
+  document.getElementById("list-view").classList.toggle("hidden", mode === "map");
+  document.getElementById("btn-locate").classList.toggle("hidden", mode !== "map");
+  refreshView();
+}
 
-  if (query.length < 2) {
-    hideSearchResults();
-    return;
+function refreshView() {
+  if (viewMode === "map") {
+    renderMap(visibleStations);
+  } else if (viewMode === "list") {
+    renderList(visibleStations);
+  } else {
+    renderFavorites();
   }
+}
 
-  searchResults.innerHTML = `<div class="search-loading">Buscando…</div>`;
-  showSearchResults();
+// === Apply filter (chiamato quando cambia: posizione, fuel, dati) ===
+function applyFilter() {
+  if (!userLatLng || allStations.length === 0) return;
+  visibleStations = filterStations(allStations, currentFuel, userLatLng, RADIUS_KM);
+  document.getElementById("status").textContent =
+    `${visibleStations.length} gasolineras · radio ${RADIUS_KM} km`;
+  refreshView();
+}
 
-  searchDebounceTimer = setTimeout(async () => {
-    const items = await fetchSuggestions(query);
-    renderSuggestions(items);
-  }, SEARCH_DEBOUNCE_MS);
-});
-
-// Chiudi suggerimenti se clicchi fuori
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".search-wrapper")) {
-    hideSearchResults();
-  }
-});
-
-// Bottone "Mi ubicación" — torna al GPS
-btnLocate.addEventListener("click", () => {
+// === Geolocalizzazione ===
+function tryGeolocate() {
   if (!navigator.geolocation) {
-    alert("Geolocalización no disponible");
+    userLatLng = VALENCIA;
+    actualUserLatLng = VALENCIA;
+    initMapAt(VALENCIA);
     return;
   }
-  btnLocate.classList.add("searching");
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      userCenter = [pos.coords.latitude, pos.coords.longitude];
-      activeCenter = userCenter;
-      searchInput.value = "";
-      if (searchMarker) {
-        map.removeLayer(searchMarker);
-        searchMarker = null;
-      }
-      map.setView(userCenter, DEFAULT_ZOOM);
-      btnLocate.classList.remove("searching");
-      recomputeNearby();
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      userLatLng = ll;
+      actualUserLatLng = ll;
+      initMapAt(ll);
     },
     () => {
-      btnLocate.classList.remove("searching");
-      alert("No se pudo obtener tu ubicación");
+      userLatLng = VALENCIA;
+      actualUserLatLng = VALENCIA;
+      initMapAt(VALENCIA);
     },
     { timeout: 5000 }
   );
+}
+
+function initMapAt(center) {
+  map = L.map("map", {
+    zoomControl: true,
+    attributionControl: true
+  }).setView(center, 13);
+
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    subdomains: "abcd",
+    maxZoom: 19
+  }).addTo(map);
+
+  // marker utente
+  if (userMarker) userMarker.remove();
+  userMarker = L.circleMarker(center, {
+    radius: 7,
+    fillColor: "#00d97e",
+    color: "#0a0e14",
+    weight: 3,
+    fillOpacity: 1
+  }).addTo(map);
+
+  loadData();
+}
+
+// === Caricamento dati ===
+async function loadData() {
+  try {
+    const res = await fetch(DATA_URL, { cache: "no-cache" });
+    const json = await res.json();
+    allStations = json.ListaEESSPrecio || [];
+    applyFilter();
+  } catch (err) {
+    document.getElementById("status").textContent = "Error al cargar datos";
+    console.error(err);
+  }
+}
+
+// === Ricerca città/indirizzo via Nominatim ===
+let searchTimeout = null;
+function setupSearch() {
+  const input = document.getElementById("search-input");
+  const results = document.getElementById("search-results");
+
+  input.addEventListener("input", () => {
+    clearTimeout(searchTimeout);
+    const q = input.value.trim();
+    if (q.length < 3) {
+      results.classList.add("hidden");
+      return;
+    }
+    searchTimeout = setTimeout(() => doSearch(q), 350);
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-wrapper")) {
+      results.classList.add("hidden");
+    }
+  });
+}
+
+async function doSearch(q) {
+  const results = document.getElementById("search-results");
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&countrycodes=es&limit=5`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.length === 0) {
+      results.innerHTML = `<div class="search-empty">No hay resultados</div>`;
+      results.classList.remove("hidden");
+      return;
+    }
+    results.innerHTML = data
+      .map(
+        (r) => `
+      <div class="search-item" data-lat="${r.lat}" data-lon="${r.lon}">
+        <div class="search-name">${r.display_name.split(",")[0]}</div>
+        <div class="search-addr">${r.display_name}</div>
+      </div>`
+      )
+      .join("");
+    results.classList.remove("hidden");
+
+    results.querySelectorAll(".search-item").forEach((item) => {
+      item.onclick = () => {
+        const lat = parseFloat(item.dataset.lat);
+        const lon = parseFloat(item.dataset.lon);
+        userLatLng = [lat, lon];
+        // userMarker resta sull'utente reale, non sulla ricerca
+        if (map) {
+          map.setView([lat, lon], 13);
+        }
+        results.classList.add("hidden");
+        document.getElementById("search-input").value = "";
+        applyFilter();
+      };
+    });
+  } catch (err) {
+    console.error("Search error:", err);
+  }
+}
+
+// === Bottone "Mi ubicación" ===
+function setupLocateBtn() {
+  document.getElementById("btn-locate").onclick = () => {
+    if (actualUserLatLng) {
+      userLatLng = actualUserLatLng;
+      if (map) map.setView(actualUserLatLng, 14);
+      applyFilter();
+    } else {
+      tryGeolocate();
+    }
+  };
+}
+
+// === Init ===
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("fav-count").textContent = favorites.length;
+
+  document.getElementById("fuel-selector").addEventListener("change", (e) => {
+    currentFuel = e.target.value;
+    applyFilter();
+  });
+
+  document.getElementById("btn-map").onclick = () => setView("map");
+  document.getElementById("btn-list").onclick = () => setView("list");
+  document.getElementById("btn-fav").onclick = () => setView("fav");
+
+  setupSearch();
+  setupLocateBtn();
+  tryGeolocate();
 });
