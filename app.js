@@ -1,6 +1,8 @@
-// ====== Tankito — app.js v0.6.1 ======
-// Versione stabile: popup ricco + distanza Haversine
-// Rollback dei cluster (markercluster non aggiungeva valore per il use case reale)
+// ====== Tankito — app.js v0.8 ======
+// Novità v0.8: dettaglio stazione migliorato
+//   - Badge orario (🟢 Abierto 24h / 🕐 stringa orario)
+//   - CP + Municipio sotto l'indirizzo
+//   - Layout popup pulito
 
 const DATA_URL = "/data/latest.json";
 const FAV_KEY = "tankito_favorites_v1";
@@ -37,7 +39,7 @@ let userMarker = null;
 let favorites = loadFavorites();
 let viewMode = "map";
 
-// === Haversine (distanza in km tra 2 punti lat/lng) ===
+// === Haversine (distanza km) ===
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -81,13 +83,11 @@ function toggleFavorite(id) {
   saveFavorites();
 }
 
-// === Parsing prezzo ===
 function parsePrice(str) {
   if (!str || str === "") return null;
   return parseFloat(String(str).replace(",", "."));
 }
 
-// === Estrai tutti i prezzi disponibili da una stazione ===
 function extractAllPrices(station) {
   const prices = {};
   for (const fuel of FUEL_DISPLAY_ORDER) {
@@ -97,7 +97,42 @@ function extractAllPrices(station) {
   return prices;
 }
 
-// === Filtro stazioni dentro raggio + ha prezzo del carburante selezionato ===
+// === NEW v0.8: Capitalizzazione titolo (gestisce stringhe in MAIUSCOLO) ===
+function toTitleCase(str) {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(/(\s+|\-|\/)/)
+    .map((part) => {
+      if (part.length === 0) return part;
+      // mantieni separatori
+      if (/^\s+$/.test(part) || part === "-" || part === "/") return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join("");
+}
+
+// === NEW v0.8: Parser orario semplificato ===
+function parseHorario(horario) {
+  if (!horario || horario.trim() === "") {
+    return { is24h: false, display: null };
+  }
+  const upper = horario.toUpperCase().trim();
+  // Caso 24h: "L-D: 24H" oppure "24H" oppure simili
+  const is24h = /\b24\s*H\b/.test(upper) && /L\s*-\s*D|TODOS|DIARIO|24H$/i.test(upper);
+  if (is24h) {
+    return { is24h: true, display: "Abierto 24h" };
+  }
+  // Altrimenti formattiamo la stringa originale per la leggibilità
+  // Sostituisce punti e virgola con · e rimuove spazi multipli
+  const cleaned = horario
+    .replace(/;/g, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { is24h: false, display: cleaned };
+}
+
+// === Filtro stazioni ===
 function filterStations(stations, fuel, center, radiusKm) {
   return stations
     .map((s) => {
@@ -116,7 +151,6 @@ function filterStations(stations, fuel, center, radiusKm) {
     .filter(Boolean);
 }
 
-// === Calcolo percentili per colorazione ===
 function computeQuartiles(stations) {
   const prices = stations.map((s) => s._price).sort((a, b) => a - b);
   const n = prices.length;
@@ -133,7 +167,6 @@ function priceColor(price, q) {
   return "#f87171";
 }
 
-// === Genera HTML della tabella prezzi nel popup ===
 function priceListHtml(allPrices, selectedFuel, selectedColor) {
   const rows = FUEL_DISPLAY_ORDER
     .filter((fuel) => allPrices[fuel] != null)
@@ -151,6 +184,30 @@ function priceListHtml(allPrices, selectedFuel, selectedColor) {
     })
     .join("");
   return `<div class="popup-prices">${rows}</div>`;
+}
+
+// === NEW v0.8: Genera HTML per la card meta (orario + indirizzo) ===
+function metaHtml(station, distText) {
+  const horario = parseHorario(station["Horario"]);
+  const cp = station["C.P."] || "";
+  const muni = station["Municipio"] ? toTitleCase(station["Municipio"]) : "";
+  const addr = station["Dirección"] ? toTitleCase(station["Dirección"]) : "";
+
+  let horarioBlock = "";
+  if (horario.is24h) {
+    horarioBlock = `<div class="popup-badge popup-badge-24h">🟢 ${horario.display}</div>`;
+  } else if (horario.display) {
+    horarioBlock = `<div class="popup-horario">🕐 ${horario.display}</div>`;
+  }
+
+  const cpMuni = [cp, muni].filter(Boolean).join(" · ");
+
+  return `
+    ${horarioBlock}
+    <div class="popup-addr">${addr}</div>
+    ${cpMuni ? `<div class="popup-locality">${cpMuni}</div>` : ""}
+    ${distText ? `<div class="popup-dist">📍 a ${distText} de ti</div>` : ""}
+  `;
 }
 
 // === Render mappa ===
@@ -172,17 +229,17 @@ function renderMap(stations) {
 
     const fav = isFavorite(s.IDEESS);
     const distText = formatDistance(s._userDist);
+    const stationName = toTitleCase(s["Rótulo"] || "Gasolinera");
 
     const popupHtml = `
       <div class="popup">
         <div class="popup-header">
-          <div class="popup-name">${s["Rótulo"] || "Gasolinera"}</div>
+          <div class="popup-name">${stationName}</div>
           <button class="popup-fav-btn ${fav ? "is-fav" : ""}" data-id="${s.IDEESS}" title="${fav ? "Quitar de favoritos" : "Guardar como favorito"}">
             ${fav ? "★" : "☆"}
           </button>
         </div>
-        <div class="popup-addr">${s["Dirección"] || ""}</div>
-        ${distText ? `<div class="popup-dist">📍 a ${distText} de ti</div>` : ""}
+        ${metaHtml(s, distText)}
         ${priceListHtml(s._allPrices, currentFuel, color)}
         <div class="popup-actions">
           <a class="popup-link" href="https://www.google.com/maps/dir/?api=1&destination=${s._lat},${s._lng}" target="_blank" rel="noopener">🧭 Cómo llegar</a>
@@ -222,11 +279,17 @@ function renderList(stations) {
       const color = priceColor(s._price, q);
       const fav = isFavorite(s.IDEESS);
       const distText = formatDistance(s._userDist);
+      const stationName = toTitleCase(s["Rótulo"] || "Gasolinera");
+      const addr = s["Dirección"] ? toTitleCase(s["Dirección"]) : "";
+      const horario = parseHorario(s["Horario"]);
+      const horarioTag = horario.is24h
+        ? `<span class="card-tag card-tag-24h">24h</span>`
+        : "";
       return `
         <article class="station-card" data-id="${s.IDEESS}">
           <div class="card-main">
-            <div class="card-name">${s["Rótulo"] || "Gasolinera"}</div>
-            <div class="card-addr">${s["Dirección"] || ""}</div>
+            <div class="card-name">${stationName} ${horarioTag}</div>
+            <div class="card-addr">${addr}</div>
             ${distText ? `<div class="card-dist">📍 a ${distText}</div>` : ""}
           </div>
           <div class="card-side">
@@ -270,7 +333,6 @@ function renderFavorites() {
   renderList(favStations);
 }
 
-// === Switch tra le 3 viste ===
 function setView(mode) {
   viewMode = mode;
   document.getElementById("btn-map").classList.toggle("active", mode === "map");
@@ -300,7 +362,6 @@ function applyFilter() {
   refreshView();
 }
 
-// === Geolocalizzazione ===
 function tryGeolocate() {
   if (!navigator.geolocation) {
     userLatLng = VALENCIA;
@@ -360,7 +421,6 @@ async function loadData() {
   }
 }
 
-// === Ricerca città/indirizzo via Nominatim ===
 let searchTimeout = null;
 function setupSearch() {
   const input = document.getElementById("search-input");
@@ -435,7 +495,6 @@ function setupLocateBtn() {
   };
 }
 
-// === Init ===
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("fav-count").textContent = favorites.length;
 
