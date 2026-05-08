@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0e14" />
   <meta name="description" content="Encuentra las gasolineras más baratas cerca de ti en España. Precios actualizados, navegación al instante." />
 
@@ -49,35 +49,19 @@
     </div>
 
     <div class="header-row controls-row">
-      <div class="view-toggle">
-        <button id="btn-map" class="chip active">
-          <span class="chip-icon">🗺️</span>
-          <span class="chip-label">Mapa</span>
-        </button>
-        <button id="btn-list" class="chip">
-          <span class="chip-icon">📋</span>
-          <span class="chip-label">Lista</span>
-        </button>
-        <button id="btn-fav" class="chip">
-          <span class="chip-icon">⭐</span>
-          <span class="chip-label">Favoritos</span>
-          <span id="fav-count" class="chip-badge">0</span>
-        </button>
-      </div>
       <div class="fuel-wrapper">
         <select id="fuel-selector">
-          <option value="gasolina95">Gasolina 95</option>
-          <option value="gasolina98">Gasolina 98</option>
-          <option value="diesel">Diésel</option>
-          <option value="dieselPremium">Diésel Premium</option>
-          <option value="glp">GLP</option>
+          <option value="gasolina95">⛽ Gasolina 95</option>
+          <option value="gasolina98">⛽ Gasolina 98</option>
+          <option value="diesel">🛢️ Diésel</option>
+          <option value="dieselPremium">🛢️ Diésel Premium</option>
+          <option value="glp">🔥 GLP</option>
         </select>
         <span class="fuel-arrow">▾</span>
       </div>
-    </div>
-
-    <div class="status-bar">
-      <span id="status">Cargando gasolineras…</span>
+      <div class="status-bar">
+        <span id="status">Cargando…</span>
+      </div>
     </div>
   </header>
 
@@ -91,6 +75,22 @@
       </svg>
     </button>
   </main>
+
+  <nav class="bottom-nav">
+    <button id="btn-map" class="nav-item active" aria-label="Mapa">
+      <span class="nav-icon">🗺️</span>
+      <span class="nav-label">Mapa</span>
+    </button>
+    <button id="btn-list" class="nav-item" aria-label="Lista">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">Lista</span>
+    </button>
+    <button id="btn-fav" class="nav-item" aria-label="Favoritos">
+      <span class="nav-icon">⭐</span>
+      <span class="nav-label">Favoritos</span>
+      <span id="fav-count" class="nav-badge">0</span>
+    </button>
+  </nav>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
