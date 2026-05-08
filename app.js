@@ -1,9 +1,7 @@
-// ====== Tankito — app.js v1.1 ======
-// Novità v1.1: Smart price alerts
-//   - detectGoodPrices(): rileva stazioni con prezzo notevolmente basso
-//   - Logica combinata: top percentile zona + (se favoriti) confronto personale
-//   - Toast in-app con anti-spam (max 1 ogni ora, mai entro 30min stessa sessione)
-//   - Architettura compatibile con push future (stessa logica, output diverso)
+// ====== Tankito — app.js v1.2 ======
+// Fix v1.2: il bottone "Ver" del toast ora zoomma correttamente sulla stazione
+//   - Cerca il marker per IDEESS dopo il setView (in caso il layer sia stato rifatto)
+//   - Aspetta che l'animazione di zoom finisca prima di aprire il popup
 
 const DATA_URL = "/data/latest.json";
 const FAV_KEY = "tankito_favorites_v1";
@@ -11,12 +9,11 @@ const ALERT_LAST_KEY = "tankito_alert_last_shown_v1";
 const VALENCIA = [39.4699, -0.3763];
 const RADIUS_KM = 30;
 
-// Soglie per "buon prezzo"
-const ALERT_TOP_PERCENTILE = 0.15;   // top 15% = buon prezzo
-const ALERT_MIN_SAVING_CENT = 5;      // almeno 5 cent in meno della media zona
-const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 min tra alert nella stessa sessione
-const ALERT_DELAY_MS = 1500;          // delay prima di mostrare toast (1.5s)
-const ALERT_DURATION_MS = 6000;       // toast resta 6 secondi
+const ALERT_TOP_PERCENTILE = 0.15;
+const ALERT_MIN_SAVING_CENT = 5;
+const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+const ALERT_DELAY_MS = 1500;
+const ALERT_DURATION_MS = 6000;
 
 const FUEL_KEYS = {
   gasolina95: "Precio Gasolina 95 E5",
@@ -43,12 +40,11 @@ let actualUserLatLng = null;
 let currentFuel = "gasolina95";
 let map = null;
 let markersLayer = null;
-let stationMarkers = {}; // mappa IDEESS -> marker, per zoomare via toast
+let stationMarkers = {};
 let userMarker = null;
 let favorites = loadFavorites();
 let viewMode = "map";
 
-// ====== HAVERSINE ======
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -68,7 +64,6 @@ function formatDistance(km) {
   return `${Math.round(km)} km`;
 }
 
-// ====== FAVORITI ======
 function loadFavorites() {
   try {
     return JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
@@ -95,7 +90,6 @@ function toggleFavorite(id) {
   saveFavorites();
 }
 
-// ====== UTILITY ======
 function parsePrice(str) {
   if (!str || str === "") return null;
   return parseFloat(String(str).replace(",", "."));
@@ -171,47 +165,45 @@ function priceColor(price, q) {
 }
 
 // ====== SMART PRICE ALERTS ======
-// Architettura riusabile: questa stessa funzione girerà lato server quando
-// implementeremo le push notifications vere (sessione 7B+)
 function detectGoodPrices(stations) {
-  if (stations.length < 10) return null; // troppo pochi dati per stat
+  if (stations.length < 10) return null;
 
-  // Calcoli statistici sulla zona
   const sortedPrices = stations.map((s) => s._price).sort((a, b) => a - b);
   const n = sortedPrices.length;
   const topThreshold = sortedPrices[Math.floor(n * ALERT_TOP_PERCENTILE)];
   const avgPrice = sortedPrices.reduce((a, b) => a + b, 0) / n;
 
-  // Stazioni "chollo": top percentile + risparmio sostanziale vs media
   const chollos = stations
     .filter((s) =>
       s._price <= topThreshold &&
       (avgPrice - s._price) >= (ALERT_MIN_SAVING_CENT / 100)
     )
-    .sort((a, b) => a._userDist - b._userDist); // più vicini in cima
+    .sort((a, b) => a._userDist - b._userDist);
 
   if (chollos.length === 0) return null;
 
-  // Caso 1: utente ha favoriti → priorità ai favoriti tra i chollos
   const favChollos = chollos.filter((s) => isFavorite(s.IDEESS));
   if (favChollos.length > 0) {
     const best = favChollos[0];
     const saving = ((avgPrice - best._price) * 100).toFixed(0);
     return {
       type: "favorite",
-      station: best,
+      stationId: best.IDEESS,
+      stationLat: best._lat,
+      stationLng: best._lng,
       message: `${toTitleCase(best["Rótulo"] || "Tu favorita")}`,
       detail: `${best._price.toFixed(3)} €/L · ${saving} cent menos que la media`,
       icon: "⭐"
     };
   }
 
-  // Caso 2: nessun favorito chollo → mostra il più vicino
   const best = chollos[0];
   const saving = ((avgPrice - best._price) * 100).toFixed(0);
   return {
     type: "nearby",
-    station: best,
+    stationId: best.IDEESS,
+    stationLat: best._lat,
+    stationLng: best._lng,
     message: `${toTitleCase(best["Rótulo"] || "Buen precio")} a ${formatDistance(best._userDist)}`,
     detail: `${best._price.toFixed(3)} €/L · ${saving} cent menos que la media`,
     icon: "💚"
@@ -223,7 +215,7 @@ function shouldShowAlert() {
     const lastShown = parseInt(localStorage.getItem(ALERT_LAST_KEY) || "0", 10);
     const now = Date.now();
     if (now - lastShown < ALERT_COOLDOWN_MS) {
-      return false; // troppo presto
+      return false;
     }
     return true;
   } catch {
@@ -235,6 +227,41 @@ function markAlertShown() {
   try {
     localStorage.setItem(ALERT_LAST_KEY, String(Date.now()));
   } catch {}
+}
+
+// === FIX v1.2: zoom + apri popup robusto ===
+function focusStationOnMap(stationId, lat, lng) {
+  if (!map) return;
+
+  // Step 1: assicurati di essere in vista mappa
+  if (viewMode !== "map") {
+    setView("map");
+  }
+
+  // Step 2: zoomma sulla stazione (animazione fluida ~700ms)
+  map.flyTo([lat, lng], 16, { duration: 0.8 });
+
+  // Step 3: aspetta che l'animazione finisca, poi apri popup
+  // Usiamo l'evento 'moveend' di Leaflet che è più affidabile di setTimeout
+  const onMoveEnd = () => {
+    map.off("moveend", onMoveEnd);
+    // Cerca il marker fresco in stationMarkers (potrebbe essere stato ricreato)
+    const marker = stationMarkers[stationId];
+    if (marker) {
+      marker.openPopup();
+    }
+  };
+  map.on("moveend", onMoveEnd);
+
+  // Fallback: se moveend non scatta entro 1.5s (es. zoom già al target),
+  // apri comunque il popup
+  setTimeout(() => {
+    map.off("moveend", onMoveEnd);
+    const marker = stationMarkers[stationId];
+    if (marker && !marker.isPopupOpen()) {
+      marker.openPopup();
+    }
+  }, 1500);
 }
 
 function showToast(alert) {
@@ -251,39 +278,30 @@ function showToast(alert) {
   toastTitle.textContent = alert.message;
   toastDetail.textContent = alert.detail;
 
-  // Mostra il toast con animazione
   toast.classList.remove("hidden");
-  // Trigger reflow per assicurare animazione
   void toast.offsetWidth;
   toast.classList.add("toast-visible");
 
-  // Tap "Ver" → zoomma sulla stazione
-  const handleView = () => {
-    if (viewMode !== "map") setView("map");
-    if (map && alert.station) {
-      map.setView([alert.station._lat, alert.station._lng], 16);
-      // Apri popup del marker
-      const marker = stationMarkers[alert.station.IDEESS];
-      if (marker) {
-        setTimeout(() => marker.openPopup(), 300);
-      }
-    }
-    hideToast();
-  };
+  let autoHideTimer;
 
-  const handleClose = () => hideToast();
-
-  toastView.onclick = handleView;
-  toastClose.onclick = handleClose;
-
-  // Auto-hide dopo X secondi
-  const autoHideTimer = setTimeout(hideToast, ALERT_DURATION_MS);
-
-  function hideToast() {
+  const hideToast = () => {
     clearTimeout(autoHideTimer);
     toast.classList.remove("toast-visible");
     setTimeout(() => toast.classList.add("hidden"), 300);
-  }
+  };
+
+  const handleView = () => {
+    hideToast();
+    // Piccolo delay per non avere il toast che chiude mentre la mappa zoomma
+    setTimeout(() => {
+      focusStationOnMap(alert.stationId, alert.stationLat, alert.stationLng);
+    }, 150);
+  };
+
+  toastView.onclick = handleView;
+  toastClose.onclick = hideToast;
+
+  autoHideTimer = setTimeout(hideToast, ALERT_DURATION_MS);
 
   markAlertShown();
 }
@@ -300,7 +318,6 @@ function maybeShowPriceAlert() {
   }, ALERT_DELAY_MS);
 }
 
-// ====== POPUP HTML ======
 function priceListHtml(allPrices, selectedFuel, selectedColor) {
   const rows = FUEL_DISPLAY_ORDER
     .filter((fuel) => allPrices[fuel] != null)
@@ -343,7 +360,6 @@ function metaHtml(station, distText) {
   `;
 }
 
-// ====== RENDER MAPPA ======
 function renderMap(stations) {
   if (markersLayer) markersLayer.remove();
   markersLayer = L.layerGroup().addTo(map);
@@ -496,7 +512,6 @@ function applyFilter() {
     `${visibleStations.length} · ${RADIUS_KM}km`;
   refreshView();
 
-  // Mostra alert solo al primo caricamento utile (non ad ogni cambio fuel)
   if (isFirstLoad && visibleStations.length > 0) {
     isFirstLoad = false;
     maybeShowPriceAlert();
