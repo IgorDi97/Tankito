@@ -3,8 +3,7 @@
 //   - File app (HTML/CSS/JS/icone): Cache First (veloce, offline-ready)
 //   - Dati prezzi (data/latest.json): Network First (sempre freschi se possibile)
 //   - Tile mappa Leaflet: Cache First (riducono il consumo dati)
-
-const const CACHE_VERSION = "tankito-v2";
+const CACHE_VERSION = "tankito-v3";
 const APP_CACHE = `${CACHE_VERSION}-app`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 const TILE_CACHE = `${CACHE_VERSION}-tiles`;
