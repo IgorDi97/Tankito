@@ -68,6 +68,16 @@
   <main>
     <div id="map"></div>
     <div id="list-view" class="hidden"></div>
+    <!-- Toast notification per smart price alerts -->
+    <div id="toast" class="toast hidden" role="alert" aria-live="polite">
+      <span id="toast-icon" class="toast-icon">💚</span>
+      <div class="toast-body">
+        <div id="toast-title" class="toast-title"></div>
+        <div id="toast-detail" class="toast-detail"></div>
+      </div>
+      <button id="toast-view" class="toast-view" aria-label="Ver">Ver</button>
+      <button id="toast-close" class="toast-close" aria-label="Cerrar">×</button>
+    </div>
     <button id="btn-locate" title="Mi ubicación" aria-label="Mi ubicación">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
