@@ -1,8 +1,9 @@
-// ====== Tankito — app.js v0.8 ======
-// Novità v0.8: dettaglio stazione migliorato
-//   - Badge orario (🟢 Abierto 24h / 🕐 stringa orario)
-//   - CP + Municipio sotto l'indirizzo
-//   - Layout popup pulito
+// ====== Tankito — app.js v1.0 ======
+// Layout mobile-first con bottom navigation
+// Mantiene tutte le feature precedenti:
+//   - Distanza Haversine (v0.5)
+//   - Popup ricco con tutti i prezzi (v0.6)
+//   - Title-case + badge orario + locality (v0.8)
 
 const DATA_URL = "/data/latest.json";
 const FAV_KEY = "tankito_favorites_v1";
@@ -27,7 +28,6 @@ const FUEL_LABELS = {
 
 const FUEL_DISPLAY_ORDER = ["gasolina95", "gasolina98", "diesel", "dieselPremium", "glp"];
 
-// === Stato applicazione ===
 let allStations = [];
 let visibleStations = [];
 let userLatLng = null;
@@ -39,7 +39,6 @@ let userMarker = null;
 let favorites = loadFavorites();
 let viewMode = "map";
 
-// === Haversine (distanza km) ===
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -59,7 +58,6 @@ function formatDistance(km) {
   return `${Math.round(km)} km`;
 }
 
-// === Favoriti ===
 function loadFavorites() {
   try {
     return JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
@@ -67,13 +65,16 @@ function loadFavorites() {
     return [];
   }
 }
+
 function saveFavorites() {
   localStorage.setItem(FAV_KEY, JSON.stringify(favorites));
   document.getElementById("fav-count").textContent = favorites.length;
 }
+
 function isFavorite(id) {
   return favorites.includes(id);
 }
+
 function toggleFavorite(id) {
   if (isFavorite(id)) {
     favorites = favorites.filter((f) => f !== id);
@@ -97,7 +98,6 @@ function extractAllPrices(station) {
   return prices;
 }
 
-// === NEW v0.8: Capitalizzazione titolo (gestisce stringhe in MAIUSCOLO) ===
 function toTitleCase(str) {
   if (!str) return "";
   return str
@@ -105,26 +105,21 @@ function toTitleCase(str) {
     .split(/(\s+|\-|\/)/)
     .map((part) => {
       if (part.length === 0) return part;
-      // mantieni separatori
       if (/^\s+$/.test(part) || part === "-" || part === "/") return part;
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join("");
 }
 
-// === NEW v0.8: Parser orario semplificato ===
 function parseHorario(horario) {
   if (!horario || horario.trim() === "") {
     return { is24h: false, display: null };
   }
   const upper = horario.toUpperCase().trim();
-  // Caso 24h: "L-D: 24H" oppure "24H" oppure simili
   const is24h = /\b24\s*H\b/.test(upper) && /L\s*-\s*D|TODOS|DIARIO|24H$/i.test(upper);
   if (is24h) {
     return { is24h: true, display: "Abierto 24h" };
   }
-  // Altrimenti formattiamo la stringa originale per la leggibilità
-  // Sostituisce punti e virgola con · e rimuove spazi multipli
   const cleaned = horario
     .replace(/;/g, " · ")
     .replace(/\s+/g, " ")
@@ -132,7 +127,6 @@ function parseHorario(horario) {
   return { is24h: false, display: cleaned };
 }
 
-// === Filtro stazioni ===
 function filterStations(stations, fuel, center, radiusKm) {
   return stations
     .map((s) => {
@@ -186,7 +180,6 @@ function priceListHtml(allPrices, selectedFuel, selectedColor) {
   return `<div class="popup-prices">${rows}</div>`;
 }
 
-// === NEW v0.8: Genera HTML per la card meta (orario + indirizzo) ===
 function metaHtml(station, distText) {
   const horario = parseHorario(station["Horario"]);
   const cp = station["C.P."] || "";
@@ -210,7 +203,6 @@ function metaHtml(station, distText) {
   `;
 }
 
-// === Render mappa ===
 function renderMap(stations) {
   if (markersLayer) markersLayer.remove();
   markersLayer = L.layerGroup().addTo(map);
@@ -264,7 +256,6 @@ function renderMap(stations) {
   });
 }
 
-// === Render Lista ===
 function renderList(stations) {
   const listEl = document.getElementById("list-view");
   if (stations.length === 0) {
@@ -316,7 +307,6 @@ function renderList(stations) {
   });
 }
 
-// === Render Favoriti ===
 function renderFavorites() {
   const favStations = allStations
     .map((s) => {
@@ -358,7 +348,7 @@ function applyFilter() {
   if (!userLatLng || allStations.length === 0) return;
   visibleStations = filterStations(allStations, currentFuel, userLatLng, RADIUS_KM);
   document.getElementById("status").textContent =
-    `${visibleStations.length} gasolineras · radio ${RADIUS_KM} km`;
+    `${visibleStations.length} · ${RADIUS_KM}km`;
   refreshView();
 }
 
@@ -416,7 +406,7 @@ async function loadData() {
     allStations = json.ListaEESSPrecio || [];
     applyFilter();
   } catch (err) {
-    document.getElementById("status").textContent = "Error al cargar datos";
+    document.getElementById("status").textContent = "Error";
     console.error(err);
   }
 }
