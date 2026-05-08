@@ -4,7 +4,7 @@
 //   - Dati prezzi (data/latest.json): Network First (sempre freschi se possibile)
 //   - Tile mappa Leaflet: Cache First (riducono il consumo dati)
 
-const CACHE_VERSION = "tankito-v1";
+const const CACHE_VERSION = "tankito-v2";
 const APP_CACHE = `${CACHE_VERSION}-app`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 const TILE_CACHE = `${CACHE_VERSION}-tiles`;
